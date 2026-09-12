@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "home-ai-exceptions"
+version = "0.1.0a1"
+description = "Observation-first exception intelligence for Home Assistant"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {file = "LICENSE"}
+[project.optional-dependencies]
+ha = ["websockets==15.0.1"]
+[project.scripts]
+home-ai = "home_ai.cli:main"
+[tool.setuptools.packages.find]
+include = ["home_ai*"]

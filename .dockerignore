@@ -1,0 +1,10 @@
+**
+!Dockerfile
+!pyproject.toml
+!README.md
+!home_ai/
+!home_ai/*.py
+!examples/
+!examples/*.jsonl
+!config/
+!config/example.json

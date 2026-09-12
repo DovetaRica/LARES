@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Home AI configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mode": {
+      "type": "string",
+      "default": "shadow",
+      "enum": [
+        "shadow"
+      ]
+    },
+    "max_events": {
+      "type": "integer",
+      "default": 100,
+      "minimum": 1
+    },
+    "max_context_chars": {
+      "type": "integer",
+      "default": 16000,
+      "minimum": 1024
+    },
+    "max_age_seconds": {
+      "type": "integer",
+      "default": 3600,
+      "minimum": 1
+    },
+    "cooldown_seconds": {
+      "type": "integer",
+      "default": 300,
+      "minimum": 1
+    },
+    "provider": {
+      "type": "string",
+      "default": "fixture",
+      "enum": [
+        "fixture",
+        "ollama"
+      ]
+    },
+    "model": {
+      "type": "string",
+      "default": ""
+    },
+    "model_url": {
+      "type": "string",
+      "default": "http://localhost:11434"
+    },
+    "allow_remote_model": {
+      "type": "boolean",
+      "default": false
+    },
+    "ha_url": {
+      "type": "string",
+      "default": ""
+    },
+    "entity_mapping": {
+      "type": "object",
+      "default": {},
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

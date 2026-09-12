@@ -1,0 +1,2 @@
+{"id": "synthetic-1", "ts": "2025-01-01T00:00:00Z", "entity_id": "example_room.presence_a", "state": "off", "kind": "presence", "source": "system", "area": "example_room"}
+{"id": "synthetic-2", "ts": "2025-01-01T00:00:01Z", "entity_id": "example_room.presence_b", "state": "on", "kind": "presence", "source": "system", "area": "example_room"}

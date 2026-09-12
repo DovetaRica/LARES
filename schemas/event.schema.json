@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Normalized Home AI event",
+  "type": "object",
+  "required": [
+    "id",
+    "ts",
+    "entity_id",
+    "state",
+    "kind",
+    "source"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "ts": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "format": "date-time"
+    },
+    "entity_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "state": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "kind": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "enum": [
+        "presence",
+        "robot",
+        "device",
+        "environment"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "enum": [
+        "system",
+        "manual",
+        "automation"
+      ]
+    },
+    "area": {
+      "type": "string",
+      "maxLength": 80
+    }
+  },
+  "additionalProperties": true
+}

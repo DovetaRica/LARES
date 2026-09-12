@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Provider decision (before pipeline metadata)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision",
+    "reason_code",
+    "evidence",
+    "explanation",
+    "uncertainty"
+  ],
+  "properties": {
+    "decision": {
+      "enum": [
+        "review",
+        "abstain"
+      ]
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "reason_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "explanation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "uncertainty": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    }
+  }
+}

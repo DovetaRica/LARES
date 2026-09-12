@@ -1,0 +1,13 @@
+{
+  "mode": "shadow",
+  "max_events": 100,
+  "max_context_chars": 16000,
+  "max_age_seconds": 3600,
+  "cooldown_seconds": 300,
+  "provider": "fixture",
+  "model": "",
+  "model_url": "http://localhost:11434",
+  "allow_remote_model": false,
+  "ha_url": "",
+  "entity_mapping": {}
+}

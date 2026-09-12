@@ -1,0 +1,6 @@
+{"id": "synthetic-1", "ts": "2025-01-01T00:00:00Z", "entity_id": "example_room.light", "state": "on", "kind": "device", "source": "automation", "area": "example_room"}
+{"id": "synthetic-2", "ts": "2025-01-01T00:00:20Z", "entity_id": "example_room.light", "state": "off", "kind": "device", "source": "manual", "area": "example_room"}
+{"id": "synthetic-3", "ts": "2025-01-01T00:06:00Z", "entity_id": "example_room.light", "state": "on", "kind": "device", "source": "automation", "area": "example_room"}
+{"id": "synthetic-4", "ts": "2025-01-01T00:06:20Z", "entity_id": "example_room.light", "state": "off", "kind": "device", "source": "manual", "area": "example_room"}
+{"id": "synthetic-5", "ts": "2025-01-01T00:12:00Z", "entity_id": "example_room.light", "state": "on", "kind": "device", "source": "automation", "area": "example_room"}
+{"id": "synthetic-6", "ts": "2025-01-01T00:13:00Z", "entity_id": "example_room.light", "state": "off", "kind": "device", "source": "manual", "area": "example_room"}
