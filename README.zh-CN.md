@@ -1,10 +1,14 @@
-# Home AI
+# LARES
+
+**Local AI Reasoning for Exceptional States**
+
+**默认确定性，只在需要时引入智能。**
 
 **自动化处理常规事件，AI 处理特殊情况。**
 
 为 Home Assistant 提供旁路异常观察与解释能力。现有自动化独立运行；重复的人工纠正可以形成待审核案例。
 
-当前版本：`v0.1.0-alpha.2`，仅支持观察，不执行设备动作。
+当前版本：`v0.1.0-alpha.3`，仅支持观察，不执行设备动作。
 
 ## 立即体验
 
@@ -40,3 +44,5 @@ Arc A310 是后续实测目标，当前没有发布硬件性能或兼容性结�
 本地每个发行版本分别保存代码快照、逐轮审查和建议，详见 [版本档案管理](docs/versioning.md)。
 
 本版修复记录见 [alpha.2 审查整改](docs/review-fixes-alpha2.md)。wheel 已包含示例，安装后可在任意工作目录运行 `home-ai demo`。HA 与模型的非本机端点都需要各自的远程开关和 HTTPS；不再接受远程明文 HTTP。
+
+项目仓库：[DovetaRica/LARES](https://github.com/DovetaRica/LARES)。Python 发行包名 `home-ai-exceptions`、模块 `home_ai`、命令 `home-ai` 保持兼容。

@@ -1,12 +1,16 @@
-# Home AI
+# LARES
 
-**Automation handles the routine. AI handles the exceptions.**
+**Local AI Reasoning for Exceptional States**
+
+### Deterministic by default. Intelligent when it matters.
+
+Automation handles the routine. LARES helps investigate the unknown.
 
 An observation-first exception intelligence layer for Home Assistant. Keep existing automation independent, inspect ambiguous events, and turn repeated manual corrections into review candidates.
 
-**Status: v0.1.0-alpha.2 — experimental, shadow mode only.**
+**Status: v0.1.0-alpha.3 — experimental, shadow mode only.**
 
-[中文](README.zh-CN.md) · [Architecture](docs/architecture.md) · [Deployment](docs/deployment.md) · [Privacy](docs/privacy.md) · [Agent guide](AGENTS.md)
+[中文](README.zh-CN.md) · [Architecture](docs/architecture.md) · [Deployment](docs/deployment.md) · [Privacy](docs/privacy.md) · [Agent install](docs/ai-install.md) · [Contributor guide](AGENTS.md)
 
 ## Try without a home, token, model, or network
 
@@ -15,7 +19,6 @@ Python 3.11+; run from the repository root, or use these commands after installi
 ```sh
 python -m home_ai demo
 python -m home_ai doctor --json
-python -m unittest discover -s tests -v
 ```
 
 The demo uses explicitly labelled **deterministic fixtures**, not actual AI inference. It never connects to Home Assistant or changes a device. Output is JSON.
@@ -57,13 +60,29 @@ docker compose run --rm demo
 
 The provided demo service has no network, host ports or host volumes. Its read-only root has a 64 MiB temporary filesystem for replay SQLite data. Building downloads dependencies. The container recipe has not yet been runtime-validated; the Python path is the tested baseline.
 
+## Install from a release
+
+Download the wheel from [Releases](https://github.com/DovetaRica/LARES/releases), install it into an isolated environment, and run `home-ai demo`. The bundled Demo is offline and requires no HA token or model. To connect a real HA installation, use the [explicit opt-in deployment steps](docs/deployment.md).
+
+For source installation:
+
+```sh
+git clone https://github.com/DovetaRica/LARES.git
+cd LARES
+python -m home_ai demo
+```
+
 ## Naming and installation artifacts
 
-The Python distribution is `home-ai-exceptions`, the import module is `home_ai`, and the command is `home-ai`; the GitHub repository name may be chosen independently. Examples are bundled in wheels and do not depend on the current directory. Each release includes a source ZIP, wheel, sdist and a commit/checksum manifest.
+The Python distribution is `home-ai-exceptions`, the import module is `home_ai`, and the command is `home-ai`; the project/repository name is LARES. Existing Python package and command names remain compatible. Examples are bundled in wheels and do not depend on the current directory. Each release includes a source ZIP, wheel, sdist and a commit/checksum manifest.
 
 ## Development and release
 
 [Extraction inventory](docs/extraction.md), [validation report](docs/validation.md), [changelog](CHANGELOG.md), [release checklist](docs/release.md).
+
+Contributing: [guide](CONTRIBUTING.md). Security reporting: [policy](SECURITY.md).
+
+Run source tests from the repository root with `python -m unittest discover -s tests -v`.
 
 Project code: Apache-2.0; see [LICENSE](LICENSE). No model weights are included. Third-party dependencies retain their own licenses; see [provenance](docs/provenance.md).
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.3
+
+- First LARES-branded public preview, preserving the home-ai-exceptions package and home-ai command for compatibility.
+- Add repository links, concise agent-install instructions, contributor guidance and security reporting policy.
+- Carry forward the alpha.2 safety, packaging and bounded-processing fixes; no new device-control capability.
+
 ## 0.1.0-alpha.2
 
 - Enforce explicit remote opt-in and TLS for non-loopback HA/model endpoints; validate URLs before connection and reject redirects.
