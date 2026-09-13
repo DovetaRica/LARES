@@ -4,10 +4,13 @@
   "max_context_chars": 16000,
   "max_age_seconds": 3600,
   "cooldown_seconds": 300,
+  "queue_capacity": 100,
+  "max_queue_age_seconds": 30,
   "provider": "fixture",
   "model": "",
   "model_url": "http://localhost:11434",
   "allow_remote_model": false,
+  "allow_remote_ha": false,
   "ha_url": "",
   "entity_mapping": {}
 }

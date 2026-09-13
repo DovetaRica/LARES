@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import importlib.util
+from importlib.resources import files, as_file
 import json
 import sys
 import tempfile
@@ -12,7 +13,7 @@ from .memory_manager import MemoryManager
 from .pipeline import normalize, timestamp
 from pathlib import Path
 from . import __version__
-from .config import load_config
+from .config import ConfigError, load_config
 from .pipeline import Pipeline
 from .provider import FixtureProvider, OllamaProvider
 
@@ -27,38 +28,39 @@ def replay(path, cfg, provider):
     decision_count = 0
     with tempfile.TemporaryDirectory(prefix="home-ai-replay-") as folder:
         db = Database(Path(folder) / "replay.db")
-        aggregator = EventAggregator(db)
-        last_ts = None
-        with Path(path).open(encoding="utf-8") as source:
-            while True:
-                line = source.readline(65537)
-                if not line:
-                    break
-                if len(line) > 65536:
-                    raise ValueError("Event line too large")
-                if not line.strip():
-                    continue
-                event = normalize(json.loads(line))
-                before = pipeline.accepted
-                result = pipeline.feed(event)
-                if pipeline.accepted != before:
-                    aggregator.process({"ts": event["ts"], "entity_id": event["entity_id"],
-                        "category": "environment" if event["kind"] == "environment" else "device",
-                        "domain": event["kind"], "event_type": "state_changed", "source": event["source"],
-                        "new_state": event["state"], "attributes_json": {}, "metadata_json": {}})
-                last_ts = timestamp(event["ts"])
-                if result:
-                    decision_count += 1
-                    decisions.append(result)
-        aggregator.flush_environment()
-        findings = AnomalyDetector(db).detect(last_ts) if last_ts else []
-        candidates = [{"type": "automation_review", "description": "Review repeated manual corrections for " + f["entity_id"],
-                       "sample_count": f["sample_count"], "consistency": 0, "evidence": [f],
-                       "reason": "Frequency alone does not establish a replacement rule."}
-                      for f in findings if f["type"] == "repeated_automation_correction"]
-        MemoryManager(db).upsert_candidates(candidates)
-        # Only bounded report output; SQLite backing storage is temporary and removed on exit.
-        candidate_rows = db.rows("SELECT description,sample_count,status FROM patterns LIMIT ?", (cfg["max_events"],))
+        with db.batch():
+            aggregator = EventAggregator(db)
+            last_ts = None
+            with Path(path).open(encoding="utf-8") as source:
+                while True:
+                    line = source.readline(65537)
+                    if not line:
+                        break
+                    if len(line) > 65536:
+                        raise ValueError("Event line too large")
+                    if not line.strip():
+                        continue
+                    event = normalize(json.loads(line))
+                    before = pipeline.accepted
+                    result = pipeline.feed(event)
+                    if pipeline.accepted != before:
+                        aggregator.process({"ts": event["ts"], "entity_id": event["entity_id"],
+                            "category": "environment" if event["kind"] == "environment" else "device",
+                            "domain": event["kind"], "event_type": "state_changed", "source": event["source"],
+                            "new_state": event["state"], "attributes_json": {}, "metadata_json": {}})
+                    last_ts = timestamp(event["ts"])
+                    if result:
+                        decision_count += 1
+                        decisions.append(result)
+            aggregator.flush_environment()
+            findings = AnomalyDetector(db).detect(last_ts) if last_ts else []
+            candidates = [{"type": "automation_review", "description": "Review repeated manual corrections for " + f["entity_id"],
+                           "sample_count": f["sample_count"], "consistency": 0, "evidence": [f],
+                           "reason": "Frequency alone does not establish a replacement rule."}
+                          for f in findings if f["type"] == "repeated_automation_correction"]
+            MemoryManager(db).upsert_candidates(candidates)
+            # Only bounded report output; SQLite backing storage is temporary and removed on exit.
+            candidate_rows = db.rows("SELECT description,sample_count,status FROM patterns LIMIT ?", (cfg["max_events"],))
     return {"scenario": Path(path).stem, "mode": "shadow", "provider": cfg["provider"],
             "decisions": list(decisions), "decision_count": decision_count,
             "decisions_truncated": decision_count > len(decisions), "review_candidates": candidate_rows,
@@ -77,7 +79,7 @@ def main(argv=None):
         if name == "replay":
             command.add_argument("path")
         if name == "demo":
-            command.add_argument("--examples", default="examples")
+            command.add_argument("--examples", help="Override the bundled synthetic examples directory")
         if name == "doctor":
             command.add_argument("--json", action="store_true")
         if name == "observe":
@@ -94,23 +96,28 @@ def main(argv=None):
                   "model_configured": bool(cfg["model"]), "config_valid": True})
         elif args.command == "demo":
             cfg["provider"] = "fixture"
-            paths = sorted(Path(args.examples).glob("*.jsonl"))
+            resource_dir = Path(args.examples) if args.examples else files("home_ai").joinpath("examples")
+            paths = sorted((p for p in resource_dir.iterdir() if p.name.endswith(".jsonl")), key=lambda p: p.name)
             if not paths:
-                raise ValueError("No demo scenarios found")
+                raise ConfigError("No demo scenarios found; check --examples or reinstall the package")
             for path in paths:
-                emit(replay(path, cfg, FixtureProvider()))
+                with as_file(path) as local_path:
+                    emit(replay(local_path, cfg, FixtureProvider()))
         else:
             if cfg["provider"] == "ollama" and not args.enable_model:
-                raise ValueError("Model network access requires --enable-model")
+                raise ConfigError("Model network access requires --enable-model")
             provider = OllamaProvider(cfg) if cfg["provider"] == "ollama" else FixtureProvider()
             if args.command == "replay":
                 emit(replay(args.path, cfg, provider))
             else:
                 if not args.connect or args.limit < 0:
-                    raise ValueError("Observation requires --connect and a nonnegative limit")
+                    raise ConfigError("Observation requires --connect and a nonnegative limit")
                 from .observe import observe
                 emit(asyncio.run(observe(cfg, provider, args.limit, emit)))
         return 0
+    except ConfigError as exc:
+        emit({"status": "error", "error_type": "ConfigError", "hint": str(exc)})
+        return 2
     except (Exception,) as exc:
         # Never echo arbitrary exception text, credentials or request contents.
         emit({"status": "error", "error_type": type(exc).__name__, "hint": "Check configuration and docs/deployment.md; no device action was executed."})

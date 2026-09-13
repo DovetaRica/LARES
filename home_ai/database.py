@@ -1,7 +1,7 @@
 import json
 import sqlite3
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -60,18 +60,41 @@ class Database:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._local = threading.local()
         with self.connect() as con:
             con.executescript(SCHEMA)
 
     @contextmanager
     def connect(self):
-        con = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
-        con.row_factory = sqlite3.Row
-        try:
-            yield con
-            con.commit()
-        finally:
-            con.close()
+        active = getattr(self._local, "connection", None)
+        if active is not None:
+            yield active
+            return
+        with self._lock:
+            con = sqlite3.connect(self.path, timeout=30)
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA foreign_keys=ON")
+            try:
+                yield con
+                con.commit()
+            except BaseException:
+                con.rollback()
+                raise
+            finally:
+                con.close()
+
+    @contextmanager
+    def batch(self):
+        """One connection and atomic transaction; no per-event fsync in a replay."""
+        if getattr(self._local, "connection", None) is not None:
+            raise RuntimeError("Nested batch transactions are unsupported")
+        with self.connect() as con:
+            con.execute("BEGIN")
+            self._local.connection = con
+            try:
+                yield self
+            finally:
+                self._local.connection = None
 
     def insert_event(self, event):
         cols = ["ts","entity_id","domain","category","event_type","old_state","new_state","source",
@@ -98,7 +121,9 @@ class Database:
             return [dict(r) for r in con.execute(sql, params).fetchall()]
 
     def backup(self, destination):
+        if getattr(self._local, "connection", None) is not None:
+            raise RuntimeError("Back up only committed transactions")
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with self._lock, self.connect() as source, sqlite3.connect(destination) as target:
+        with self._lock, self.connect() as source, closing(sqlite3.connect(destination)) as target:
             source.backup(target)

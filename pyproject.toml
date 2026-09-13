@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools==80.9.0", "wheel==0.45.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "home-ai-exceptions"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Observation-first exception intelligence for Home Assistant"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,3 +15,6 @@ ha = ["websockets==15.0.1"]
 home-ai = "home_ai.cli:main"
 [tool.setuptools.packages.find]
 include = ["home_ai*"]
+
+[tool.setuptools.package-data]
+home_ai = ["examples/*.jsonl"]

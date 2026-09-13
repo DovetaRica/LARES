@@ -4,7 +4,9 @@
 !README.md
 !home_ai/
 !home_ai/*.py
-!examples/
-!examples/*.jsonl
+!home_ai/examples/
+!home_ai/examples/*.jsonl
 !config/
 !config/example.json
+!LICENSE
+!NOTICE

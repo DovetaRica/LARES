@@ -14,22 +14,26 @@
     "max_events": {
       "type": "integer",
       "default": 100,
-      "minimum": 1
+      "minimum": 1,
+      "maximum": 100000
     },
     "max_context_chars": {
       "type": "integer",
       "default": 16000,
-      "minimum": 1024
+      "minimum": 1024,
+      "maximum": 1048576
     },
     "max_age_seconds": {
       "type": "integer",
       "default": 3600,
-      "minimum": 1
+      "minimum": 1,
+      "maximum": 604800
     },
     "cooldown_seconds": {
       "type": "integer",
       "default": 300,
-      "minimum": 1
+      "minimum": 1,
+      "maximum": 86400
     },
     "provider": {
       "type": "string",
@@ -41,7 +45,8 @@
     },
     "model": {
       "type": "string",
-      "default": ""
+      "default": "",
+      "maxLength": 160
     },
     "model_url": {
       "type": "string",
@@ -58,10 +63,31 @@
     "entity_mapping": {
       "type": "object",
       "default": {},
+      "propertyNames": {
+        "minLength": 1,
+        "maxLength": 160
+      },
       "additionalProperties": {
         "type": "string",
-        "minLength": 1
+        "minLength": 1,
+        "maxLength": 80
       }
+    },
+    "queue_capacity": {
+      "type": "integer",
+      "default": 100,
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "max_queue_age_seconds": {
+      "type": "integer",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 3600
+    },
+    "allow_remote_ha": {
+      "type": "boolean",
+      "default": false
     }
   }
 }

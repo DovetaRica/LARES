@@ -4,6 +4,8 @@ services:
     build: .
     network_mode: none
     read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     restart: "no"

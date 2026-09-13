@@ -102,7 +102,7 @@ class PublicTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/"config.json"; path.write_text('{"provider":"ollama","model":"example"}')
             with patch.object(socket.socket,"connect",side_effect=AssertionError),contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(main(["replay","examples/sensor_conflict.jsonl","--config",str(path)]),2)
+                self.assertEqual(main(["replay","home_ai/examples/sensor_conflict.jsonl","--config",str(path)]),2)
 
     def test_observe_requires_connect(self):
         with contextlib.redirect_stdout(io.StringIO()): self.assertEqual(main(["observe"]),2)
@@ -127,7 +127,7 @@ class PublicTests(unittest.TestCase):
             def __aiter__(self): return self
             async def __anext__(self): raise StopAsyncIteration
         ws=FakeSocket()
-        cfg={**load_config(),"ha_url":"http://example.invalid","entity_mapping":{"light.fixture":"example.light"}}
+        cfg={**load_config(),"ha_url":"https://example.invalid","allow_remote_ha":True,"entity_mapping":{"light.fixture":"example.light"}}
         with patch.dict('sys.modules',{'websockets':types.SimpleNamespace(connect=lambda *a,**k:ws)}), patch.dict('os.environ',{'HOME_AI_HA_TOKEN':'synthetic-test-value'}):
             asyncio.run(observe(cfg,FixtureProvider(),1,lambda x:None))
         self.assertEqual([r['type'] for r in ws.sent],['auth','subscribe_events'])

@@ -1,7 +1,7 @@
 import json
 from collections import deque, OrderedDict
 from datetime import datetime, timezone
-from .provider import FixtureProvider, validate_decision
+from .provider import FixtureProvider, validate_decision, bounded_payload
 
 
 def timestamp(value):
@@ -19,7 +19,10 @@ def normalize(raw):
         raise ValueError("Unsupported event kind/source")
     timestamp(raw["ts"])
     event = {k: raw[k] for k in required}
-    event["area"] = str(raw.get("area", "example_area"))[:80]
+    area = raw.get("area", "example_area")
+    if not isinstance(area, str) or len(area) > 80:
+        raise ValueError("Invalid area")
+    event["area"] = area
     return event
 
 
@@ -31,6 +34,7 @@ class Pipeline:
         self.last_call = {}
         self.latest = None
         self.total = self.accepted = self.calls = self.failures = 0
+        self.budget_skipped = self.cooldown_skipped = self.context_skipped = 0
 
     def feed(self, raw):
         self.total += 1
@@ -70,16 +74,17 @@ class Pipeline:
             return None
         key = (event["entity_id"], reason)
         if key in self.last_call:
+            self.cooldown_skipped += 1
             return None
         if len(self.last_call) >= self.cfg["max_events"]:
+            self.budget_skipped += 1
             return None  # bounded per-window inference budget
         self.last_call[key] = now
-        payload = {"trigger": reason, "events": list(self.events)}
-        while len(json.dumps(payload, ensure_ascii=True)) > self.cfg["max_context_chars"] and len(payload["events"]) > 1:
-            payload["events"].pop(0)
-        if len(json.dumps(payload, ensure_ascii=True)) > self.cfg["max_context_chars"]:
+        payload = bounded_payload(reason, self.events, self.cfg)
+        if payload is None:
+            self.context_skipped += 1
             return {"decision": "abstain", "reason_code": "context_budget_exceeded", "evidence": [],
-                    "explanation": "Event exceeds configured input budget.", "uncertainty": "Not analyzed.", "executed": False}
+                    "explanation": "Event exceeds configured input budget.", "uncertainty": "Not analyzed.", "executed": False, "provider": self.cfg["provider"]}
         self.calls += 1
         try:
             result = validate_decision(self.provider.analyze(payload), {e["id"] for e in payload["events"]})
@@ -92,4 +97,5 @@ class Pipeline:
 
     def metrics(self):
         return {"input_events": self.total, "accepted_events": self.accepted, "provider_calls": self.calls,
-                "provider_failures": self.failures, "buffered_events": len(self.events), "executed_actions": 0}
+                "provider_failures": self.failures, "budget_skipped": self.budget_skipped,
+                "cooldown_skipped": self.cooldown_skipped, "context_skipped": self.context_skipped, "buffered_events": len(self.events), "executed_actions": 0}
