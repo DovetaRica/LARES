@@ -36,3 +36,5 @@ python -m unittest discover -s tests -v
 Arc A310 是后续实测目标，当前没有发布硬件性能或兼容性结论。容器配方尚未运行验证，当前验证基线为 Python 命令。
 
 [架构](docs/architecture.md) · [隐私](docs/privacy.md) · [提取记录](docs/extraction.md) · [验收](docs/validation.md) · [发布清单](docs/release.md)
+
+本地每个发行版本分别保存代码快照、逐轮审查和建议，详见 [版本档案管理](docs/versioning.md)。

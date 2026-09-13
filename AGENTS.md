@@ -30,3 +30,7 @@ Keep source installations, deployment scripts, private configuration, tokens, de
 ## Changes and verification
 
 Use scoped commits on codex/ branches. Keep runtime and test dependencies isolated. After relevant changes run offline tests, demos, config validation and the public scan. Add a regression test for failure modes, not tests that merely mirror implementation. Document unsupported features in README and CHANGELOG. Container builds or real hardware validation must not be reported as tested unless actually run.
+
+## Local version archives
+
+Follow docs/versioning.md. Maintain one ignored versions/<release-tag>/ folder per release, containing a frozen source archive, original review rounds and editable suggestions. Preserve old versions and original reports. Apply fixes in the root working tree; archive only committed/tagged releases. Never stage raw review records or version snapshots into the public repository. Record actual reviewed commit IDs and retest evidence.

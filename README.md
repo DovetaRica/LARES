@@ -62,3 +62,5 @@ The provided demo service has no network, host ports or host volumes. Building d
 [Extraction inventory](docs/extraction.md), [validation report](docs/validation.md), [changelog](CHANGELOG.md), [release checklist](docs/release.md).
 
 Project code: Apache-2.0; see [LICENSE](LICENSE). No model weights are included. Third-party dependencies retain their own licenses; see [provenance](docs/provenance.md).
+
+Local release folders and continuous review records: [versioning workflow](docs/versioning.md).
