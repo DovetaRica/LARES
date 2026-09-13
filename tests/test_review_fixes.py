@@ -214,7 +214,7 @@ class ReviewFixTests(unittest.TestCase):
 
     def test_extended_scanner_and_artifacts(self):
         values=['AK'+'IA'+'A'*16,'sk'+'-'+'a'*24,'xo'+'xb-'+'12345678901','AI'+'za'+'a'*32,
-                'password'+'="'+'secretvalue123'+'"','172'+'.20.1.2']
+                'password'+'="'+'secretvalue123'+'"','token'+'=secretvalue123','172'+'.20.1.2']
         for value in values:
             self.assertTrue(scan_text(value),value[:3])
         with tempfile.TemporaryDirectory() as folder:

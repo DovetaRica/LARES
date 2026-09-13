@@ -24,7 +24,7 @@ PATTERNS = [
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"),
     re.compile(r"\bAIza[0-9A-Za-z_-]{30,}"),
 ]
-ASSIGNMENT = re.compile(r"(?im)\b(?:password|secret|api_key|access_token|[a-z0-9_]+_(?:token|password|secret|api_key))[\"']?\s*[:=]\s*(?:[\"']([^\"'\r\n]{8,})[\"']|([a-zA-Z0-9_!@#$%+=:/-]{8,})(?=\s|$))")
+ASSIGNMENT = re.compile(r"(?im)\b(?:password|secret|api_key|token|access_token|[a-z0-9_]+_(?:token|password|secret|api_key))[\"']?\s*[:=]\s*(?:[\"']([^\"'\r\n]{8,})[\"']|([a-zA-Z0-9_!@#$%+=:/-]{8,})(?=\s|$))")
 
 
 def scan_text(text):
