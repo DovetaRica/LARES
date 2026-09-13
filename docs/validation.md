@@ -1,24 +1,25 @@
-# Validation report — 0.1.0-alpha.1
+# Validation report — 0.1.0-alpha.2
 
-Performed locally on Windows with Python 3.12:
+## Executed locally
 
 | Check | Result |
 | --- | --- |
-| Standard-library offline test suite | 16 tests passed |
-| Three synthetic CLI demos | Passed; zero executed actions |
-| Example config validation | Passed |
-| Local doctor JSON | Passed; reports optional dependency availability without network probes |
-| Isolated editable installation with HA extra | Passed in repository-local virtual environment |
-| Python wheel build | Passed; public package contents inspected |
-| Public tracked-file/history heuristic scan | Passed |
-| Selected private credential/endpoint exact-match comparison | No matches in public files |
-| Source file SHA-256 comparison | 55 snapshotted source files unchanged |
-| Git diff whitespace check | Passed |
+| Python 3.12.10 offline suite | 30 tests passed |
+| Python 3.14.7 offline suite | 30 tests passed |
+| Fixture Demo, replay and example configuration | Passed |
+| Commit-based source ZIP, wheel and sdist build | Passed, using requirements-build.txt pins |
+| Fresh wheel installation outside repository | Module Demo with socket guard, console Demo, doctor and validate-config passed |
+| Fresh sdist installation outside repository | Same checks passed in a separate temporary environment |
+| Public working/staged/history scanner and built-artifact scanner | Passed |
+| Database benchmark against alpha.1 snapshot | Same schema, three runs; see review-fixes-alpha2.md |
+| Git whitespace check | Passed |
 
-Tests cover network-blocked demos, ordinary-event inference avoidance, bounded context, provider failure, evidence forgery, action rejection, duplicate handling, event ordering, stale/stopped robot evidence, configuration validation, explicit connection/model opt-ins, HA field projection, a mocked read-only HA protocol, streaming aggregation and rejected-candidate preservation.
+Package tests are performed on actual built distributions, not inferred from editable installation. Release outputs and checksums are retained in the version-specific dist folder and local version archive. Final commit and build-tool versions are in release-manifest.json.
 
-No running HA, NAS, model server or device was contacted for validation. No source deployment, restart, configuration write or source Git mutation was performed. File hashes verify the snapshotted local files, not independent uptime of remote services.
+Regressions cover HA URL/TLS/opt-in policy, safe error reporting, malformed-frame continuation, blocked-model ingestion, bounded queues and expiry, full request budgeting with escaping, mocked HTTP request construction, response schema rejection, cooldown/budget metrics, atomic transactions, backup connection cleanup, oldest-entity eviction, package-resource discovery, expanded scanner patterns and staged-blob scanning.
 
-Not tested: real HA/Ollama integration, GPU inference, Docker build/run, non-Windows runtime and remote CI matrix. Mocked protocol tests do not establish full integration compatibility. No latency, accuracy, power or inference-savings claims are made.
+## Not executed locally
 
-Privacy checks are heuristic plus review of selected source values; they do not constitute a guarantee that arbitrary future contributions are safe to publish.
+No real Home Assistant, NAS, Ollama, GPU or device was contacted. No existing service was started, stopped, restarted or reconfigured. No Docker engine was accessed. Container configuration was corrected statically and a dedicated CI job added, but no runtime pass is claimed. Python 3.11/3.13 and Linux CI results are pending; matrix configuration alone is not a test result.
+
+No model accuracy, real-service latency, power consumption or byte-identical wheel reproducibility is claimed. Privacy scanning is heuristic and does not certify anonymity. Original alpha.1 code snapshots and review originals are retained unchanged; current work is isolated to the public project.

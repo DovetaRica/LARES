@@ -2,11 +2,11 @@
 
 ## Offline baseline
 
-Python 3.11+, repository root:
+Python 3.11+. Source-specific paths below are relative to the repository root. Installed wheels include the default Demo, so `home-ai demo` works from an unrelated directory:
 
 ```sh
 python -m home_ai demo
-python -m home_ai replay examples/automation_correction.jsonl
+python -m home_ai replay home_ai/examples/automation_correction.jsonl
 python -m home_ai validate-config --config config/example.json
 python -m home_ai doctor --json
 ```
@@ -31,11 +31,13 @@ python3 -m venv .venv
 .venv/bin/python -m home_ai doctor --json
 ```
 
-`home-ai` is installed as an equivalent console command in that environment. Installing downloads packaging tools and the optional websockets dependency. It does not start services.
+`home-ai` is installed as an equivalent console command in that environment. Wheel users can install the versioned `.whl` and run `home-ai demo` directly; optional `--examples` overrides the bundled data. A custom replay file remains an explicit user path. Installing downloads packaging tools and the optional websockets dependency. It does not start services.
 
 ## Explicit HA observation
 
 Copy `config/example.json` to ignored `config/private.json`. Set `ha_url` for your own environment and an explicit `entity_mapping`, for example `{"light.example": "example_room.light", "binary_sensor.example": "example_room.presence"}`. Use the same alias prefix only for sensors intentionally compared in one area. Unmapped entities are discarded before reasoning; the HA subscription still receives state-change messages before filtering.
+
+Non-loopback HA endpoints require `allow_remote_ha: true` and an `https://` URL. Loopback HTTP is accepted. URL types, credentials in URLs, invalid ports, query strings and fragments are rejected during `validate-config` and again at connection entry. HA and model redirects and ambient proxies are disabled; do not rely on a redirect to change the configured endpoint. For an HTTP-only LAN HA installation, configure a TLS endpoint before using this release.
 
 Supply your token locally using the process environment variable `HOME_AI_HA_TOKEN`; do not put it in tracked files or paste it into an issue. Then run:
 
@@ -43,16 +45,16 @@ Supply your token locally using the process environment variable `HOME_AI_HA_TOK
 python -m home_ai observe --config config/private.json --connect --limit 100
 ```
 
-The limit counts accepted mapped messages, not seconds. `--limit 0` runs until interrupted. Ctrl+C exits. This version exits on connection loss; automatic reconnect and persistent live history are future work. It does not fetch initial states, so only new observed changes are available as evidence. The connector only authenticates and subscribes to `state_changed`; it has no service call or configuration write path.
+The limit counts well-formed mapped arrivals, including arrivals dropped because the queue is full, not seconds. Queued events drain before normal exit. `queue_capacity` defaults to 100 and `max_queue_age_seconds` to 30. Malformed messages are skipped and counted; queue overflow drops newest arrivals, while expired items are skipped before inference. Final metrics report all these outcomes. An interruption or connection error emits partial metrics before exiting. `--limit 0` runs until interrupted. Ctrl+C exits. This version exits on connection loss; automatic reconnect and persistent live history are future work. It does not fetch initial states, so only new observed changes are available as evidence. The connector only authenticates and subscribes to `state_changed`; it has no service call or configuration write path.
 
 Read-only behavior is enforced by this implementation, not by an assumption that the provided HA token lacks write privileges.
 
 ## Explicit model inference
 
-In private configuration set `provider` to `ollama`, `model` to a model you have already installed, and `model_url` to its API base. Non-loopback endpoints require `allow_remote_model: true`, including LAN/container host addresses. This opt-in is a network boundary, not an automatic anonymization guarantee.
+In private configuration set `provider` to `ollama`, `model` to a model you have already installed, and `model_url` to its API base. Non-loopback endpoints require `allow_remote_model: true` and HTTPS, including LAN/container host addresses. This opt-in is a network boundary, not an automatic anonymization guarantee.
 
 ```sh
-python -m home_ai replay examples/sensor_conflict.jsonl --config config/private.json --enable-model
+python -m home_ai replay home_ai/examples/sensor_conflict.jsonl --config config/private.json --enable-model
 python -m home_ai observe --config config/private.json --connect --enable-model
 ```
 
@@ -60,6 +62,10 @@ The adapter never downloads models. Ambient HTTP proxy settings and HTTP redirec
 
 ## Containers and removal
 
-`docker compose run --rm demo` builds a separate demo image and runs without network, host mounts or exposed ports. The image includes optional HA dependencies, but the default Compose service cannot reach HA or a model. This recipe is not runtime-validated yet.
+`docker compose run --rm demo` builds a separate demo image and runs without network, host mounts or exposed ports. A 64 MiB `/tmp` tmpfs provides writable temporary storage while the root filesystem remains read-only. The image includes optional HA dependencies, but the default Compose service cannot reach HA or a model. This recipe is not runtime-validated yet.
 
 No production deployment is installed by the Python quickstart. Stop a foreground command with Ctrl+C. Local installation can be removed by deleting only this repository's virtual environment; do not run cleanup or Compose commands against an existing home deployment. Keep private data separate when upgrading; use release tags to select code versions.
+
+## Building release artifacts
+
+Install `requirements-build.txt` in an isolated environment, then use `python scripts/build_release.py --ref v0.1.0-alpha.2 --out dist/v0.1.0-alpha.2`. The output directory must be empty. The builder uses a fresh Git archive of that commit, not stale working-tree build files. See [release workflow](release.md) for installation smoke tests and exact archive reproduction.

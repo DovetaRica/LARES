@@ -10,7 +10,7 @@ Run from this repository root, Python 3.11+:
 - `python -m home_ai doctor --json`: local configuration/dependency diagnostics; no network health claim.
 - `python -m home_ai validate-config --config config/example.json`.
 - `python -m unittest discover -s tests -v`.
-- `python scripts/check_public.py`: tracked files and history heuristic scan; stage intended files first.
+- `python scripts/check_public.py`: working/staged/history heuristic scan; stage intended files first. Use `--artifact` for specific release outputs.
 
 No dependencies are needed for offline operation. Install optional HA dependencies in a repository-local virtual environment as documented in docs/deployment.md.
 
@@ -21,7 +21,7 @@ No dependencies are needed for offline operation. Install optional HA dependenci
 - home_ai/observe.py: opt-in HA observation, field projection.
 - home_ai/database.py, event_aggregator.py, anomaly_detector.py, memory_manager.py: extracted modules used in offline replay.
 - home_ai/cli.py: explicit command entry points; no import-time service startup.
-- examples/: synthetic inputs only.
+- home_ai/examples/: bundled synthetic inputs only.
 
 ## Boundaries
 
@@ -34,3 +34,5 @@ Use scoped commits on codex/ branches. Keep runtime and test dependencies isolat
 ## Local version archives
 
 Follow docs/versioning.md. Maintain one ignored versions/<release-tag>/ folder per release, containing a frozen source archive, original review rounds and editable suggestions. Preserve old versions and original reports. Apply fixes in the root working tree; archive only committed/tagged releases. Never stage raw review records or version snapshots into the public repository. Record actual reviewed commit IDs and retest evidence.
+
+Release builds: install requirements-build.txt in an isolated environment, run scripts/build_release.py from a reviewed commit, then scripts/smoke_distributions.py against the version-specific output directory. Do not mark wheel/sdist installation as validated from editable-install success alone.

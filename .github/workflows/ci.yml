@@ -24,3 +24,10 @@ jobs:
       - run: python scripts/build_release.py --ref HEAD --out dist/ci
       - run: python scripts/smoke_distributions.py dist/ci
       - run: python scripts/check_public.py --artifact dist/ci
+  container-demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t home-ai-demo .
+      - run: docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 --cap-drop ALL --security-opt no-new-privileges:true home-ai-demo
