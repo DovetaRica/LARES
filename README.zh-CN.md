@@ -2,47 +2,30 @@
 
 **Local AI Reasoning for Exceptional States**
 
-**默认确定性，只在需要时引入智能。**
+**当前本地候选：v0.2.0-alpha.1；仍为只读观察的实验版本。** GitHub 在下一次发布前仍可能显示 alpha.3。
 
-**自动化处理常规事件，AI 处理特殊情况。**
+新版提取了通用网页界面、分层记忆、时段/日报/周报流程、证据学习、模型对照和流式统计代码。家庭实体、原始事件、密钥、数据库、部署脚本和内部运维文档不进入公开包。
 
-为 Home Assistant 提供旁路异常观察与解释能力。现有自动化独立运行；重复的人工纠正可以形成待审核案例。
+## 离线体验
 
-当前版本：`v0.1.0-alpha.3`，仅支持观察，不执行设备动作。
-
-## 立即体验
-
-需要 Python 3.11 或更新版本。在仓库目录执行：
+推荐 Python 3.12，在独立虚拟环境中运行：
 
 ```sh
-python -m home_ai demo
-python -m home_ai doctor --json
-python -m unittest discover -s tests -v
+python -m pip install ".[app]"
+python -m app.demo
+lares-app --demo
 ```
 
-无需安装依赖即可运行离线 Demo。输出为 JSON，包含三个合成场景：机器人活动与人员存在、传感器冲突、反复人工纠正。默认提供者 `fixture` 是固定测试响应，不是真实大模型推理。
+浏览器打开 http://127.0.0.1:8080 。演示使用临时合成数据，不接 HA、不调用模型、不控制设备。退出后临时文件删除。AI 报告不会被伪造为演示结果。
 
-## 已实现
-
-- 事件数、时间跨度、完整模型请求大小限制（包括系统提示和 JSON 封装）；重复过滤和调用冷却。
-- 从原项目提取的 SQLite 存储、环境统计聚合、异常检测与候选记忆，用于离线回放。
-- 回放中重复三次人工纠正，生成待审核候选；不生成或启用自动化。
-- 显式开启的 HA 事件订阅和 Ollama 推理入口。
-- 模型失败、非法输出、伪造证据时放弃判断。
-- 独立 Docker 示例、配置校验、诊断、测试和 Agent 文档。
-
-实时观察已加入有界接收队列、畸形消息容错、队列溢出与过期计数，目前仍仅输出判断，未接入长期数据库、模式学习及断线自动重连。上下文采用截断，层级摘要尚未迁移。数据库中候选分数属于启发式内部指标，不是模型准确率。
+旧版 `python -m home_ai demo` 保持兼容，无需应用扩展依赖。
 
 ## 使用边界
 
-公共版本默认不读取其他目录的配置，不自动加载 `.env`，不启动定时任务。真实 HA 接入要求专门的 token 环境变量和实体映射；模型调用要求 `--enable-model`。详见 [部署说明](docs/deployment.md)。
+应用默认关闭联网和定时任务。它会读取专用工作目录的 `.env`，因此不要从生产目录启动，也不要连接已有生产数据库。真实接入须显式配置网络开关、HTTPS 远程端点和自己的实体白名单。模型、提示词效果、完整真实接入及跨版本数据库迁移尚未验证。
 
-Arc A310 是后续实测目标，当前没有发布硬件性能或兼容性结论。容器配方尚未运行验证，当前验证基线为 Python 命令。
+来源项目的 466 项测试结果不代表公开提取版的结果；请以本版独立验证为准。已有预处理性能限制仍保留，不承诺 GPU 性能、识别准确率或生产吞吐。
 
-[架构](docs/architecture.md) · [隐私](docs/privacy.md) · [提取记录](docs/extraction.md) · [验收](docs/validation.md) · [发布清单](docs/release.md)
+[新版安装与边界](docs/application.md) · [提取说明](docs/extraction-v02.md) · [原 CLI 部署](docs/deployment.md) · [版本档案](docs/versioning.md) · [隐私](docs/privacy.md)
 
-本地每个发行版本分别保存代码快照、逐轮审查和建议，详见 [版本档案管理](docs/versioning.md)。
-
-本版修复记录见 [alpha.2 审查整改](docs/review-fixes-alpha2.md)。wheel 已包含示例，安装后可在任意工作目录运行 `home-ai demo`。HA 与模型的非本机端点都需要各自的远程开关和 HTTPS；不再接受远程明文 HTTP。
-
-项目仓库：[DovetaRica/LARES](https://github.com/DovetaRica/LARES)。Python 发行包名 `home-ai-exceptions`、模块 `home_ai`、命令 `home-ai` 保持兼容。
+每版保留独立本地 source、artifacts、reviews 和 SUGGESTIONS；不会将私有审查材料推送到 GitHub。此次提取不改变现有服务。

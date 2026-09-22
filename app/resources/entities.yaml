@@ -1,0 +1,13 @@
+# Synthetic identifiers only. Replace with an explicit personal allowlist locally.
+include_entities: [light.example_lamp, binary_sensor.example_presence, sensor.example_temperature]
+exclude_entities: []
+domains: [light, binary_sensor, sensor]
+environment:
+  device_classes: [temperature, humidity]
+  entity_keywords: []
+presence:
+  device_classes: [occupancy, motion, presence]
+appliances:
+  domains: [vacuum]
+  keywords: {}
+area_names: {}

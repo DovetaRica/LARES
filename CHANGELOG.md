@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0-alpha.1 (local extraction candidate)
+
+- Add optional local application UI, layered-memory/report and evidence-learning modules.
+- Include streaming telemetry statistics and stricter observed correction classification.
+- Remove household defaults; bundle synthetic configuration and newly authored prompts.
+- Add explicit networking/scheduling gates, TLS remote opt-in and local request boundaries.
+- Preserve the original CLI and all previous versions; no automatic database migration.
+- Add deterministic application demo and offline extraction-specific checks.
+
+
 ## 0.1.0-alpha.3
 
 - First LARES-branded public preview, preserving the home-ai-exceptions package and home-ai command for compatibility.

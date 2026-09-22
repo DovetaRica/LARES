@@ -31,3 +31,19 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t home-ai-demo .
       - run: docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 --cap-drop ALL --security-opt no-new-privileges:true home-ai-demo
+  application-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -c requirements-app-lock.txt ".[app]" pytest==9.1.1
+      - run: python -m pytest -q runtime_tests
+      - run: python -m app.demo
+      - run: python -m scripts.smoke_app
+      - run: python -m pip install -r requirements-build.txt
+      - run: python scripts/build_release.py --ref HEAD --out dist/app-ci
+      - run: python scripts/smoke_distributions.py dist/app-ci --with-app

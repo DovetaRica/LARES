@@ -36,3 +36,7 @@ Use scoped commits on codex/ branches. Keep runtime and test dependencies isolat
 Follow docs/versioning.md. Maintain one ignored versions/<release-tag>/ folder per release, containing a frozen source archive, original review rounds and editable suggestions. Preserve old versions and original reports. Apply fixes in the root working tree; archive only committed/tagged releases. Never stage raw review records or version snapshots into the public repository. Record actual reviewed commit IDs and retest evidence.
 
 Release builds: install requirements-build.txt in an isolated environment, run scripts/build_release.py from a reviewed commit, then scripts/smoke_distributions.py against the version-specific output directory. Do not mark wheel/sdist installation as validated from editable-install success alone.
+
+## Optional application (0.2)
+
+Read docs/application.md and docs/extraction-v02.md. app/ is a separate optional runtime; never point it at an existing database. Keep egress/scheduling disabled by default. Run python -m pytest -q runtime_tests and python -m scripts.smoke_app in an app-enabled environment. Preserve the dependency-free home_ai CLI. Private provenance and reviews remain ignored.

@@ -1,6 +1,6 @@
 # Release workflow
 
-Current target: `v0.1.0-alpha.3` (Python package version `0.1.0a3`).
+Current target: `v0.2.0-alpha.1` (Python package version `0.2.0a1`).
 
 1. Review changes, run offline tests, Demo, replay, configuration validation and privacy scan. Commit the reviewed public files.
 2. Create a new immutable release tag; never move the alpha.1 tag.
@@ -8,10 +8,10 @@ Current target: `v0.1.0-alpha.3` (Python package version `0.1.0a3`).
 4. Run:
 
 ```sh
-python scripts/build_release.py --ref v0.1.0-alpha.3 --out dist/v0.1.0-alpha.3
-python scripts/smoke_distributions.py dist/v0.1.0-alpha.3
-python scripts/check_public.py --artifact dist/v0.1.0-alpha.3
-python scripts/snapshot_version.py v0.1.0-alpha.3
+python scripts/build_release.py --ref v0.2.0-alpha.1 --out dist/v0.2.0-alpha.1
+python scripts/smoke_distributions.py dist/v0.2.0-alpha.1
+python scripts/check_public.py --artifact dist/v0.2.0-alpha.1
+python scripts/snapshot_version.py v0.2.0-alpha.1
 ```
 
 The build command extracts the selected commit into a clean temporary directory, builds sdist and wheel (wheel from the sdist), scans artifacts, and writes a manifest with commit, package/tool versions and SHA-256 checksums. It never reads .private-audit or invokes Docker. Smoke checks install wheel and sdist into separate clean environments and run both module and console Demo entry points away from the repository; the module Demo also has a socket guard.
@@ -19,7 +19,7 @@ The build command extracts the selected commit into a clean temporary directory,
 Source ZIP reproduction (including its original directory prefix):
 
 ```sh
-git archive --format=zip --prefix=home-ai-0.1.0a3/ --output=rebuilt-source.zip v0.1.0-alpha.3
+git archive --format=zip --prefix=home-ai-0.2.0a1/ --output=rebuilt-source.zip v0.2.0-alpha.1
 ```
 
 The archive prefix and source commit are recorded in `release-manifest.json`. The alpha.1 source ZIP was also produced directly by git archive, using the prefix `home-ai-0.1.0-alpha.1/`; a prefix alone is not evidence of manual repackaging. Source contents are reproducible; byte-identical wheels across machines/toolchains are not claimed.

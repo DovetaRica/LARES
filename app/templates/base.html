@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}LARES{% endblock %}</title>
+  <script>
+    // Apply the saved theme before first paint so the page never flashes the
+    // wrong mode. No save → follow the system preference once, then lock it.
+    (function () {
+      var theme = null;
+      try { theme = localStorage.getItem("home-ai-theme"); } catch (e) {}
+      if (theme !== "light" && theme !== "dark") {
+        theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      document.documentElement.setAttribute("data-theme", theme);
+      document.documentElement.style.colorScheme = theme;
+    })();
+  </script>
+  <link rel="icon" type="image/svg+xml" href="/static/home-ai.svg?v={{ static_version('home-ai.svg') }}">
+  <link rel="stylesheet" href="/static/styles.css?v={{ static_version('styles.css') }}">
+  <link rel="stylesheet" href="/static/apple-theme.css?v={{ static_version('apple-theme.css') }}">
+  <script defer src="/static/app.js?v={{ static_version('app.js') }}"></script>
+</head>
+<body data-page="{{ active }}">
+  {# Four groups instead of eleven flat links. Each group lists its own pages, and the
+     group holding the current page is marked so the header still says where you are.
+     A new page belongs in a group here, so nothing is reachable only by hidden means. #}
+  {% set nav_groups = [
+    ('报告', [('6 小时总结', '/periods', 'periods'), ('日报', '/daily', 'daily'),
+              ('周报', '/weekly', 'weekly'), ('自动化建议', '/suggestions', 'suggestions')]),
+    ('AI记忆', [('行为规律', '/patterns', 'patterns'), ('长期记忆', '/memories', 'memories')]),
+    ('AI互动', [('给 AI 建议', '/guidance', 'guidance'), ('AI 提问', '/questions', 'questions')]),
+    ('数据与运维', [('在场时段', '/sessions', 'sessions'), ('事件', '/events', 'events'),
+              ('系统状态', '/status', 'status'), ('设置', '/settings', 'settings')]),
+  ] %}
+  <header class="site-header">
+    <a class="brand" href="/">LARES</a>
+    <nav class="desktop-nav" aria-label="主导航">
+      <a href="/" {% if active == 'dashboard' %}aria-current="page"{% endif %}>总览</a>
+      {% for name, links in nav_groups %}
+      {% set active_in_group = active in links|map(attribute=2)|list %}
+      <details class="nav-group"{% if active_in_group %} data-current="1"{% endif %}>
+        <summary{% if active_in_group %} aria-current="page"{% endif %}>{% if active_in_group %}{% for label, href, key in links %}{% if key == active %}<span class="nav-label-stack"><span>{{ name }}</span><span class="nav-current-page">{{ label }}</span></span>{% endif %}{% endfor %}{% else %}{{ name }}{% endif %}</summary>
+        <nav class="nav-menu" aria-label="{{ name }}">{% for label, href, key in links %}<a href="{{ href }}" {% if active == key %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
+      </details>
+      {% endfor %}
+    </nav>
+    <details class="mobile-nav">
+      <summary aria-label="打开导航">菜单</summary>
+      <nav><a href="/">总览</a>{% for name, links in nav_groups %}<p class="nav-group-label">{{ name }}</p>{% for label, href, key in links %}<a href="{{ href }}" {% if active == key %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}{% endfor %}</nav>
+    </details>
+    <button type="button" class="theme-toggle" data-theme-toggle
+            aria-label="切换深色模式" aria-pressed="false" title="切换深色/浅色">
+      <span class="theme-toggle-track" aria-hidden="true">
+        <span class="theme-toggle-thumb"></span>
+        <span class="theme-toggle-icon theme-toggle-icon-sun">☀</span>
+        <span class="theme-toggle-icon theme-toggle-icon-moon">☾</span>
+      </span>
+    </button>
+  </header>
+  <main class="container">{% block content %}{% endblock %}</main>
+  <footer>观察窗口 · 不控制 Home Assistant</footer>
+</body>
+</html>

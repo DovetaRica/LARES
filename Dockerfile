@@ -3,6 +3,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /opt/home-ai
 COPY pyproject.toml README.md LICENSE NOTICE ./
 COPY home_ai ./home_ai
+COPY app ./app
 RUN pip install --no-cache-dir ".[ha]" && useradd --uid 10001 --no-create-home homeai
 COPY config/example.json ./config/example.json
 USER homeai

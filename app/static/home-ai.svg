@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Home AI">
+  <defs>
+    <linearGradient id="background" x1="8" y1="4" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5AC8FA"/>
+      <stop offset="0.52" stop-color="#087CE5"/>
+      <stop offset="1" stop-color="#004A9B"/>
+    </linearGradient>
+    <linearGradient id="home" x1="20" y1="19" x2="45" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#D8EDFF"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#background)"/>
+  <path d="M15 31.2 32 17l17 14.2v17.3a2.5 2.5 0 0 1-2.5 2.5H37V38H27v13h-9.5a2.5 2.5 0 0 1-2.5-2.5V31.2Z" fill="url(#home)"/>
+  <circle cx="45.5" cy="18.5" r="6.5" fill="#FFFFFF" fill-opacity=".2"/>
+  <path d="m45.5 13.5 1.15 3.85 3.85 1.15-3.85 1.15-1.15 3.85-1.15-3.85-3.85-1.15 3.85-1.15 1.15-3.85Z" fill="#FFFFFF"/>
+</svg>

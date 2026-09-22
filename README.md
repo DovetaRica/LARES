@@ -8,9 +8,13 @@ Automation handles the routine. LARES helps investigate the unknown.
 
 An observation-first exception intelligence layer for Home Assistant. Keep existing automation independent, inspect ambiguous events, and turn repeated manual corrections into review candidates.
 
-**Status: v0.1.0-alpha.3 — experimental, shadow mode only.**
+**Status: v0.2.0-alpha.1 — experimental, shadow mode only.**
 
 [中文](README.zh-CN.md) · [Architecture](docs/architecture.md) · [Deployment](docs/deployment.md) · [Privacy](docs/privacy.md) · [Agent install](docs/ai-install.md) · [Contributor guide](AGENTS.md)
+
+## New optional application preview
+
+Version 0.2 adds the extracted local dashboard, layered memory/report orchestration and streaming statistics. Install with `python -m pip install ".[app]"`, run `python -m app.demo`, then `lares-app --demo` for a temporary synthetic UI. See [application setup and limits](docs/application.md) and [extraction notes](docs/extraction-v02.md). This candidate is prepared locally; GitHub may still serve alpha.3 until publication.
 
 ## Try without a home, token, model, or network
 
@@ -44,11 +48,11 @@ HA observation currently streams decisions; persistent live history and candidat
 
 ## Model and HA access are opt-in
 
-Follow [deployment](docs/deployment.md) for isolated installation and configuration. The default configuration uses fixtures. Real inference requires `provider: ollama`, an explicit model name and `--enable-model`. HA requires `observe --connect`, an explicit mapping and an environment token. Nothing loads an existing `.env` automatically.
+Follow [deployment](docs/deployment.md) for isolated installation and configuration. The default configuration uses fixtures. Real inference requires `provider: ollama`, an explicit model name and `--enable-model`. HA requires `observe --connect`, an explicit mapping and an environment token. The original CLI does not load `.env`; the optional application reads its dedicated working directory, as documented separately.
 
 ## Roadmap, not current claims
 
-Hierarchical summaries, semantic rule synthesis, counterexample evaluation, persistent live learning, reconnect recovery, execution policy, HA Add-on/HACS packaging, and hardware benchmarks remain future work. Current context handling truncates old events; it does not prove that all important evidence survives.
+The optional app includes layered summaries, persisted learning and reconnect/report orchestration code. Live integration validation, migration, HA Add-on/HACS packaging and hardware benchmarks remain future work. Current context handling truncates old events; it does not prove that all important evidence survives.
 
 Intel Arc A310 is a planned validation target. No GPU support, speed, power, minimum hardware, or percentage of avoided inference is claimed as measured here.
 
@@ -58,7 +62,7 @@ Intel Arc A310 is a planned validation target. No GPU support, speed, power, min
 docker compose run --rm demo
 ```
 
-The provided demo service has no network, host ports or host volumes. Its read-only root has a 64 MiB temporary filesystem for replay SQLite data. Building downloads dependencies. The container recipe has not yet been runtime-validated; the Python path is the tested baseline.
+The provided demo service has no network, host ports or host volumes. Its read-only root has a 64 MiB temporary filesystem for replay SQLite data. Building downloads dependencies. The alpha.3 CLI container passed GitHub CI. This extraction has not rerun Docker locally; the optional app is not part of this container recipe.
 
 ## Install from a release
 

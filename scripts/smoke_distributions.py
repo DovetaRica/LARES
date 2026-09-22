@@ -19,6 +19,7 @@ def run(command, cwd, env):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory',type=Path)
+    parser.add_argument('--with-app', action='store_true', help='Also install and test optional application')
     args=parser.parse_args()
     artifacts=sorted([*args.directory.glob('*.whl'),*args.directory.glob('*.tar.gz')])
     if len(artifacts)!=2: raise SystemExit('Expected exactly one wheel and one sdist')
@@ -44,6 +45,14 @@ def main():
             console=run([str(cli),'demo'],work,env)
             assert len(console.splitlines())==3
             print(json.dumps({'artifact':artifact.name,'fresh_install':'PASS','outside_repo_demo':'PASS','console_demo':'PASS'}),flush=True)
+            if args.with_app:
+                run([str(python),'-m','pip','install','--disable-pip-version-check','--no-build-isolation',
+                     '-c',str(root/'requirements-app-lock.txt'),str(artifact.resolve())+'[app]'],work,env)
+                demo=json.loads(run([str(python),'-I','-c',guard.replace("'home_ai'", "'app.demo'")],work,env))
+                assert demo['synthetic'] and demo['model_calls']==0 and demo['executed_actions']==0
+                result=run([str(python),'-I',str(root/'scripts/smoke_app.py')],work,env)
+                assert 'PASS: 14 offline routes' in result
+                print(json.dumps({'artifact':artifact.name,'installed_application':'PASS','offline_routes':14}),flush=True)
     return 0
 
 if __name__=='__main__': raise SystemExit(main())

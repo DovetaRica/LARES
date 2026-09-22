@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% from "_macros.html" import badge, feedback_buttons, render_value %}
+{% block title %}行为规律 · Home AI{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">事实等级清晰分开</p><h1>行为规律</h1></div></div>
+<nav class="tabs">{% for key,label in [('candidate','候选'),('confirmed','已确认'),('rejected','已否定'),('obsolete','已过时')] %}<a href="/patterns?status={{ key }}" {% if selected_status == key %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
+<div class="card-list">{% for pattern in patterns %}<article class="card pattern-card {{ pattern.status }}">{{ badge(pattern.status) }}<h2>{{ pattern.description }}</h2><div class="metrics"><span>类型 <b>{{ pattern.type }}</b></span><span>置信度 <b>{{ pattern.confidence_percent }}%</b></span><span><b>{{ pattern.sample_count }}</b> 个样本</span></div><div class="dates"><span>首次出现<br><b>{{ pattern.first_seen|moment }}</b></span><span>最近出现<br><b>{{ pattern.last_seen|moment }}</b></span></div>{% if pattern.evidence %}<details><summary>证据</summary>{{ render_value(pattern.evidence) }}</details>{% endif %}{{ feedback_buttons(pattern) }}</article>{% else %}<div class="empty">这个分类目前没有规律记录。</div>{% endfor %}</div>
+{% endblock %}

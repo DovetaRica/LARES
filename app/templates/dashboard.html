@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% from "_macros.html" import badge, feedback_buttons, render_value %}
+{% block content %}
+<section class="hero">
+  <div><p class="eyebrow">家庭行为学习</p><h1>Home AI</h1><p>看见 AI 学到了什么，并明确告诉它哪里正确、哪里不准确。</p></div>
+  <a class="health-pill {{ 'healthy' if status.home_assistant.connected and status.ollama.connected and status.database.ok else 'degraded' }}" href="/status">● {{ '系统正常' if status.home_assistant.connected and status.ollama.connected and status.database.ok else '需要关注' }}</a>
+</section>
+<section class="stats" aria-label="统计摘要">
+  <a class="stat candidate" href="/patterns?status=candidate"><strong>{{ status.counts.candidate_patterns }}</strong><span>候选规律</span></a>
+  <a class="stat confirmed" href="/memories"><strong>{{ status.counts.memories }}</strong><span>已确认的长期记忆</span></a>
+  <a class="stat rejected" href="/patterns?status=rejected"><strong>{{ status.counts.rejected_patterns }}</strong><span>已否定规律</span></a>
+  <a class="stat info" href="/suggestions"><strong>{{ status.counts.suggestions }}</strong><span>自动化建议</span></a>
+</section>
+{# Two halves: the guidance card is exactly two stat columns wide, the newest report
+   takes the other half. History is one line per item; the full text stays in the
+   title attribute and in /guidance, so nothing is rewritten or lost. #}
+<section class="dashboard-split">
+  <article class="card guidance-card">
+    <div class="section-heading"><div><p class="eyebrow">你的关注点</p><h2>给 AI 提建议</h2></div><a href="/guidance">管理建议</a></div>
+    <form class="guidance-form"><textarea name="content" maxlength="1000" required placeholder="例如：请重点关注夜间 CO₂ 是否过高，以及净水器 TDS 的变化。"></textarea><label>适用范围<select name="scope"><option value="all">全部分析</option><option value="period">仅 6 小时总结</option><option value="daily">仅日报</option><option value="weekly">仅周报</option></select></label><div class="actions"><button class="button" type="submit" data-busy-label="正在保存…">提交给 AI</button><span class="form-status muted" role="status"></span></div></form>
+    {% if guidance %}<div class="guidance-list compact-guidance">{% for item in guidance %}<div><span title="{{ item.content }}">{{ item.content }}</span><small>{{ item.created_at|moment }}</small></div>{% endfor %}</div>{% endif %}
+  </article>
+  <article class="card">
+    <div class="section-heading"><div><p class="eyebrow">每 6 小时一次</p><h2>最新报告</h2></div><a href="/periods">全部时段</a></div>
+    {% if period %}<p class="meta">{{ period.display_label or period.period_start|moment }}{% if period.created_label %} · 生成于 {{ period.created_label }}{% endif %} · {{ period.llm_model or '本地模型' }}</p><div class="report-body">{{ render_value(period_body, report_labels) }}</div>{% else %}<div class="empty">尚未生成 6 小时总结</div>{% endif %}
+    <p class="meta">日报见 <a href="/daily">{{ daily.display_label or '今日总结' }}</a>{% if daily %} · 生成于 {{ daily.created_label or '—' }}{% endif %}</p>
+  </article>
+</section>
+<section><div class="section-heading"><div><p class="eyebrow">最近发现</p><h2>行为规律</h2></div><a href="/patterns">查看全部</a></div>
+  <div class="card-list">
+  {% for pattern in patterns %}<article class="card pattern-card {{ pattern.status }}">{{ badge(pattern.status) }}<h3>{% if pattern.status == 'candidate' %}AI 发现了一个可能的规律：{% endif %}{{ pattern.description }}</h3><div class="metrics"><span><b>{{ pattern.confidence_percent }}%</b> 置信度</span><span><b>{{ pattern.sample_count }}</b> 个样本</span><span>{{ pattern.type }}</span></div>{{ feedback_buttons(pattern) }}</article>
+  {% else %}<div class="empty">尚无规律记录。学习期内这是正常状态。</div>{% endfor %}
+  </div>
+</section>
+{% endblock %}

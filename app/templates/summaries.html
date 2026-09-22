@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "_macros.html" import render_value %}
+{% block title %}{{ title }} · Home AI{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">只展示数据库中已有分析</p>
+    <h1>{{ title }}</h1>
+    <p class="muted">共 {{ items|length }} 份记录；点击左侧任一时段查看历史报告。时间为北京时间（UTC+8）。</p>
+  </div>
+</div>
+<div class="split-layout">
+  <aside class="summary-list">
+    <h2>历史记录（{{ items|length }}）</h2>
+    {% for item in items %}
+    <a href="?{{ key }}={{ item[key]|urlencode }}"{% if selected and selected[key] == item[key] %} aria-current="page"{% endif %}>
+      <b>{% if selected and selected[key] == item[key] %}✓ {% endif %}{{ item.display_label or item[key]|moment }}</b>
+    </a>
+    {% else %}<div class="empty">尚无记录</div>{% endfor %}
+  </aside>
+  <article class="card summary-detail">
+    {% if selected %}
+    <p class="meta">当前查看：<b>{{ selected.display_label or selected[key]|moment }}</b>{% if selected.created_label %} · 生成于 {{ selected.created_label }}{% endif %}{% if selected.llm_duration_ms %} · 耗时 {{ (selected.llm_duration_ms / 1000)|round(1) }} 秒{% endif %}</p>
+    {% if selected.generation_status %}
+    <p><span class="badge {{ selected.status_class or 'info' }}">{{ selected.status_label or selected.generation_status }}</span>{% if selected.error_type %} <span class="muted">错误类型：{{ selected.error_type }}（只记录异常类型，不含家庭内容）</span>{% endif %}</p>
+    {% endif %}
+    {% if selected.show_variants %}
+    <nav class="variants" aria-label="模型版本">
+      {% for v in selected.variants %}<a href="?{{ key }}={{ selected[key]|urlencode }}&amp;model={{ v.llm_model|urlencode }}"{% if v.current %} aria-current="page"{% endif %}>{{ v.llm_model }}</a>{% endfor %}
+    </nav>
+    {% endif %}
+    <p class="report-actions">
+      <label class="model-picker">模型<select class="regenerate-model" data-third-party="{{ third_party_models|join(',') }}"{% if selected.regenerating %} disabled{% endif %}>{% for name in model_options %}<option value="{{ name }}"{% if name == default_model %} selected{% endif %}>{{ name }}{% if name in third_party_models %} · 第三方{% endif %}</option>{% endfor %}</select></label>
+      <button class="button secondary regenerate-report" data-scope="{{ report_scope }}" data-key="{{ selected[key] }}"{% if selected.regenerating %} data-running="1"{% endif %}{% if selected.regenerating or selected.generation_status in non_terminal_statuses %} disabled{% endif %}>{% if selected.regenerating %}正在重新生成…{% else %}↻ 重新总结{% endif %}</button>
+      {% if selected.can_distill or selected.distilling %}<button class="button secondary distill-report" data-scope="{{ report_scope }}" data-key="{{ selected[key] }}"{% if selected.distilling or selected.regenerating %} disabled{% endif %} data-busy-label="正在提交…">{% if selected.distilling %}正在蒸馏…{% else %}⇩ 蒸馏版{% endif %}</button>{% endif %}<span class="form-status muted" role="status"></span>
+      {% if third_party_models %}<span class="provider-warning muted" hidden>第三方模型：本时段家庭数据会发送到外部服务</span>{% endif %}
+    </p>
+    {% if selected.reference_model %}<p class="muted">本报告在生成时参考了 {{ selected.reference_model }}{% if selected.reference_period %} 于 {{ selected.reference_period|moment }}{% endif %} 的报告作为范例（范例只影响结构与篇幅，本时段的事实仍来自本次输入）。</p>{% endif %}
+    {% if selected.legacy_shape %}<p class="notice">该记录以旧版模型原始结构保存，这里只按只读兼容方式展示其中的文本，数据库内容未被改写。</p>{% endif %}
+    {{ render_value(selected.display_body, report_labels) }}
+    {% if selected.display_metadata %}
+    <details class="technical-metadata">
+      <summary>维护信息（普通阅读可忽略）</summary>
+      {{ render_value(selected.display_metadata, report_labels) }}
+    </details>
+    {% endif %}
+    {% elif requested %}
+    <div class="empty">未找到时段「{{ requested|moment }}」。请从左侧历史记录中选择。</div>
+    {% else %}<div class="empty">尚无{{ title }}</div>{% endif %}
+  </article>
+</div>
+{% endblock %}

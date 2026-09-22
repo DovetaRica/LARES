@@ -1,0 +1,38 @@
+{% macro badge(status) -%}
+<span class="badge {{ status }}">{% if status == 'candidate' %}AI 猜测 · 尚未确认{% elif status == 'confirmed' %}已经确认{% elif status == 'rejected' %}已经否定{% elif status == 'obsolete' %}已过时{% else %}{{ status }}{% endif %}</span>
+{%- endmacro %}
+
+{# labels translate keys for readability. They are applied to a mapping's own keys
+   and handed down to list entries, but never into a nested mapping: that keeps the
+   report sections and their entries readable while leaving diagnostic blobs such as
+   cooccurrence_meta and its raw payload-collection names in their JSON form.
+
+   The timestamp keys below are rendered as "2026年9月11日 20:24:52". A value that is
+   not a timestamp passes through the filter unchanged, so an over-long key list is
+   harmless; a missing one is not, because it shows a raw UTC/ISO string. #}
+{% set time_keys = ("first_seen", "last_seen", "first_ts", "last_ts", "ts", "start_ts",
+                    "end_ts", "created_at", "updated_at", "generated_at", "reviewed_at",
+                    "archived_at", "answered_at", "queued_at", "started_at", "finished_at",
+                    "lookback_start", "lookback_end", "window_start", "window_end",
+                    "period_start", "period_end", "collection_started_at", "last_event",
+                    "day", "date", "week_start") %}
+{% macro render_value(value, labels=none) -%}
+  {% if value is mapping and value.label is defined and value.hint is defined %}
+    {# An entity resolved to a device: the name is shown, the raw id stays on hover. #}
+    <span class="pre-wrap" title="{{ value.hint }}">{{ value.label }}</span>
+  {% elif value is mapping %}
+    <dl class="summary-grid">{% for key, item in value.items() %}<div><dt>{% if labels and key in labels %}{{ labels[key] }}{% else %}{{ key|replace('_',' ')|title }}{% endif %}</dt><dd>{% if key in time_keys and item is string %}<span class="pre-wrap">{{ item|moment }}</span>{% else %}{{ render_value(item, labels if item is sequence and item is not mapping else none) }}{% endif %}</dd></div>{% endfor %}</dl>
+  {% elif value is sequence and value is not string %}
+    {% if value %}<ol class="evidence">{% for item in value %}<li>{{ render_value(item, labels) }}</li>{% endfor %}</ol>{% else %}<span class="muted">无</span>{% endif %}
+  {% else %}<span class="pre-wrap">{{ value }}</span>{% endif %}
+{%- endmacro %}
+
+{% macro feedback_buttons(pattern) -%}
+{% if pattern.status == 'candidate' %}
+<div class="actions">
+  <a class="button secondary" href="/patterns/{{ pattern.id }}">查看</a>
+  <button class="button confirm feedback-action" data-id="{{ pattern.id }}" data-action="confirm" data-busy-label="正在确认…">✓ 确认</button>
+  <button class="button reject feedback-action" data-id="{{ pattern.id }}" data-action="reject" data-busy-label="正在否定…">✗ 否定</button>
+</div>
+{% else %}<a class="button secondary" href="/patterns/{{ pattern.id }}">查看详情</a>{% endif %}
+{%- endmacro %}
