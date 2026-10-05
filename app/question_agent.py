@@ -8,6 +8,28 @@ from .llm_schema import RetryableModelFormatError, validate_question_response
 from .question_policy import QuestionPolicy, default as default_policy
 from .time_display import chinese_label, moment
 logger = logging.getLogger(__name__)
+
+def _clean_options(raw):
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        text = str(item or '').strip()[:40]
+        if text and text not in out:
+            out.append(text)
+        if len(out) >= 5:
+            break
+    return out
+
+def _parse_options(raw):
+    return _clean_options(raw)
 ANSWER_SCOPES = {'all': 'all', 'period': 'period', 'daily': 'daily', 'weekly': 'weekly', 'slot': None}
 ANSWER_SCOPE_LABELS = {'all': '所有报告', 'period': '所有六小时报告', 'daily': '日报', 'weekly': '周报', 'slot': '下一天的同样时段'}
 DUPLICATE_SIMILARITY = 0.57
@@ -117,6 +139,7 @@ class QuestionAgent:
             row['created_label'] = moment(row.get('created_at'))
             row['answered_label'] = moment(row.get('answered_at'))
             row['source_label'] = self._source_label(row)
+            row['options'] = _parse_options(row.get('options_json'))
             row['slot_available'] = self._next_slot(row.get('scope_key')) is not None
         return rows
 
@@ -336,7 +359,7 @@ class QuestionAgent:
                     dropped['quota'] += 1
                     logger.warning('question rejected by quota key=%s source=%s', quota_key, source)
                     continue
-                cursor = con.execute("INSERT INTO ai_questions(question,why,source,scope_key,status,created_at) VALUES(?,?,?,?,'pending',?)", (question[:300], why, source, scope_key, now))
+                cursor = con.execute("INSERT INTO ai_questions(question,why,source,scope_key,status,created_at,options_json) VALUES(?,?,?,?,'pending',?,?)", (question[:300], why, source, scope_key, now, json.dumps(_clean_options(item.get('options')), ensure_ascii=False) if _clean_options(item.get('options')) else None))
                 created.append(cursor.lastrowid)
                 accepted.append(question)
         self._record_job(source, min(len(items), 3), len(created), dropped)

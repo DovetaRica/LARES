@@ -60,4 +60,4 @@ class OpenAICompatibleClient:
         choice = (data.get('choices') or [{}])[0]
         if choice.get('finish_reason') == 'length':
             logger.warning('third-party answer truncated at max_tokens=%s', REMOTE_OUTPUT_TOKENS)
-        return ((choice.get('message') or {}).get('content') or '', {'provider': self.provider, 'model': chosen})
+        return ((choice.get('message') or {}).get('content') or '', {'provider': self.provider, 'model': chosen, 'usage': data.get('usage') or {}})

@@ -20,7 +20,7 @@
   </script>
   <link rel="icon" type="image/svg+xml" href="/static/home-ai.svg?v={{ static_version('home-ai.svg') }}">
   <link rel="stylesheet" href="/static/styles.css?v={{ static_version('styles.css') }}">
-  <link rel="stylesheet" href="/static/apple-theme.css?v={{ static_version('apple-theme.css') }}">
+  <link rel="stylesheet" href="/static/rhine-theme.css?v={{ static_version('rhine-theme.css') }}">
   <script defer src="/static/app.js?v={{ static_version('app.js') }}"></script>
 </head>
 <body data-page="{{ active }}">
@@ -36,7 +36,7 @@
               ('系统状态', '/status', 'status'), ('设置', '/settings', 'settings')]),
   ] %}
   <header class="site-header">
-    <a class="brand" href="/">LARES</a>
+    <a class="brand" href="/" aria-label="LARES"><span>HOME AI</span><span class="brand-caption">BEHAVIOR OBSERVATORY</span></a>
     <nav class="desktop-nav" aria-label="主导航">
       <a href="/" {% if active == 'dashboard' %}aria-current="page"{% endif %}>总览</a>
       {% for name, links in nav_groups %}
@@ -61,6 +61,6 @@
     </button>
   </header>
   <main class="container">{% block content %}{% endblock %}</main>
-  <footer>观察窗口 · 不控制 Home Assistant</footer>
+  <footer><span>HOME AI / OBSERVATION SYSTEM</span><span>观察窗口 · 不控制 Home Assistant</span></footer>
 </body>
 </html>

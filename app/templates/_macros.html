@@ -1,5 +1,5 @@
 {% macro badge(status) -%}
-<span class="badge {{ status }}">{% if status == 'candidate' %}AI 猜测 · 尚未确认{% elif status == 'confirmed' %}已经确认{% elif status == 'rejected' %}已经否定{% elif status == 'obsolete' %}已过时{% else %}{{ status }}{% endif %}</span>
+<span class="badge {{ status }}">{% if status == 'candidate' %}AI 猜测 · 尚未确认{% elif status == 'observed' %}程序观察 · 未经房主确认{% elif status == 'confirmed' %}已经确认{% elif status == 'rejected' %}已经否定{% elif status == 'obsolete' %}已过时{% else %}{{ status }}{% endif %}</span>
 {%- endmacro %}
 
 {# labels translate keys for readability. They are applied to a mapping's own keys

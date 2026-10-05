@@ -24,6 +24,10 @@
     {% if selected.generation_status %}
     <p><span class="badge {{ selected.status_class or 'info' }}">{{ selected.status_label or selected.generation_status }}</span>{% if selected.error_type %} <span class="muted">错误类型：{{ selected.error_type }}（只记录异常类型，不含家庭内容）</span>{% endif %}</p>
     {% endif %}
+    {% if selected.unavailable_windows %}
+    <div class="notice"><b>综合范围存在缺口</b>：以下窗口的报告缺失或未通过校验，未作为事实输入；这不表示没有活动。
+    <ul>{% for window in selected.unavailable_windows %}<li>{{ window.key|moment }}</li>{% endfor %}</ul></div>
+    {% endif %}
     {% if selected.show_variants %}
     <nav class="variants" aria-label="模型版本">
       {% for v in selected.variants %}<a href="?{{ key }}={{ selected[key]|urlencode }}&amp;model={{ v.llm_model|urlencode }}"{% if v.current %} aria-current="page"{% endif %}>{{ v.llm_model }}</a>{% endfor %}

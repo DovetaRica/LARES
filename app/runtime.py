@@ -25,6 +25,7 @@ from .scheduler import make_scheduler
 from .segment_memory import SegmentMemory
 from .sleep_tracker import SleepTracker
 from .arrival_tracker import ArrivalTracker
+from .home_topology import HomeTopology
 from .session_manager import SessionManager
 from .web import REGENERATION_REGISTRY, create_web_router, run_regeneration_worker
 
@@ -66,25 +67,27 @@ provider_settings = ProviderSettings(db, settings.database_path.parent, settings
 if settings.third_party_enabled and (not provider_settings.read()['enabled']):
     provider_settings.save(True, settings.third_party_base_url, [name.strip() for name in settings.third_party_models.split(',') if name.strip()], settings.third_party_default_model, api_key=settings.third_party_api_key or None)
 ollama = ModelGateway(local_model, provider_settings.client(), provider_settings.automatic_model())
+ollama.database = db
 if ollama.remote is not None:
     logging.getLogger(__name__).info('third-party model provider enabled models=%s', len(ollama.remote_models))
-memory = MemoryManager(db, settings.min_pattern_samples)
+memory = MemoryManager(db, settings.min_pattern_samples, _noise_entities, _non_occupancy_entities)
 anomalies = AnomalyDetector(db)
 cooccurrence = CooccurrenceAnalyzer.from_path(db, settings.config_path, settings.timezone, gated_presence_entities=_noise_entities + _non_occupancy_entities) if settings.cooccurrence_enabled else None
 questions = QuestionAgent(db, ollama, settings=settings)
-analyzer = BehaviorAnalyzer(db, ollama, memory, anomalies, settings.learning_days, settings.learning_only, settings.timezone, cooccurrence=cooccurrence, questions=questions, context_tokens=settings.model_context_tokens, output_reserve_tokens=settings.model_output_reserve_tokens, prompt_reserve_tokens=settings.model_prompt_reserve_tokens, distill_context_tokens=settings.distill_context_tokens, remote_payload_token_budget=settings.remote_payload_token_budget)
-prompt_path = settings.config_path.parent / 'prompts' / 'system.txt'
+analyzer = BehaviorAnalyzer(db, ollama, memory, anomalies, settings.learning_days, settings.learning_only, settings.timezone, cooccurrence=cooccurrence, questions=questions, context_tokens=settings.model_context_tokens, output_reserve_tokens=settings.model_output_reserve_tokens, prompt_reserve_tokens=settings.model_prompt_reserve_tokens, distill_context_tokens=settings.distill_context_tokens, remote_payload_token_budget=settings.remote_payload_token_budget, automatic_distillation=settings.automatic_distillation)
+prompt_path = Path(__file__).parent / 'resources' / 'prompts' / 'system.txt'
 db.set_state('system_prompt_sha256', hashlib.sha256(prompt_path.read_bytes()).hexdigest())
 sleep_tracker = SleepTracker(db, settings.sleep_curtain_entity, [name.strip() for name in settings.sleep_bed_entities.split(',') if name.strip()], room=settings.sleep_room)
 arrival_tracker = ArrivalTracker(db, settings.arrival_outside_entity, settings.arrival_entry_entity, pair_window_seconds=settings.arrival_pair_window_seconds, entry_door_entity=getattr(settings, 'arrival_entry_door_entity', '') or None, short_trip_seconds=getattr(settings, 'arrival_short_trip_seconds', 60))
 ha = HAClient(settings.ha_url, settings.ha_token, event_filter, aggregator, sessions, db, sleep_tracker=sleep_tracker, arrival_tracker=arrival_tracker)
+analyzer.home_topology = HomeTopology.from_path(settings.config_path.parent / 'home_topology.json')
 analyzer.ha = ha
 analyzer.event_filter = event_filter
 analyzer.presence_noise_entities = frozenset((name.strip() for name in settings.presence_noise_entities.split(',') if name.strip()))
 analyzer.presence_non_occupancy_entities = frozenset((name.strip() for name in settings.presence_non_occupancy_entities.split(',') if name.strip()))
 segment_memory = SegmentMemory(db, analyzer, settings, model_lock=analyzer._model_lock)
 analyzer.segment_memory = segment_memory
-scheduler = make_scheduler(settings, analyzer, aggregator, db, segment_memory=segment_memory)
+scheduler = make_scheduler(settings, analyzer, aggregator, db, segment_memory=segment_memory, arrival_tracker=arrival_tracker)
 
 async def queue_distillation(scope, key, teacher_model):
     queue_key = f'{scope}:{key}'
@@ -116,6 +119,7 @@ async def backfill_missing_periods(analyzer):
 
 @asynccontextmanager
 async def lifespan(app):
+    arrival_tracker.flush_pending()
     if not settings.lares_enable_network or not settings.ha_token or settings.ha_token.startswith('replace_'):
         logging.getLogger(__name__).error('HA_TOKEN is missing; collector will not start')
         task = None

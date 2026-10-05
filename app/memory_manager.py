@@ -19,8 +19,10 @@ def calculate_confidence(sample_count, consistency, counter_examples=0, span_day
 
 class MemoryManager:
 
-    def __init__(self, database, min_pattern_samples=5):
+    def __init__(self, database, min_pattern_samples=5, noise_entities=(), non_occupancy_entities=()):
         self.db = database
+        self.noise_entities = frozenset(noise_entities)
+        self.non_occupancy_entities = frozenset(non_occupancy_entities)
         if isinstance(min_pattern_samples, bool) or not isinstance(min_pattern_samples, int) or (not 1 <= min_pattern_samples <= 100):
             raise ValueError('invalid min_pattern_samples')
         self.min_pattern_samples = min_pattern_samples
@@ -157,3 +159,86 @@ class MemoryManager:
             con.execute('INSERT INTO feedback(pattern_id,action,note,created_at) VALUES(?,?,?,?)', (pattern_id, action, note, now))
             con.execute('INSERT INTO memories(pattern_id,type,content,confidence,sample_count,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)', (pattern_id, pattern['type'], pattern['description'], 1.0 if status == 'confirmed' else pattern['confidence'], pattern['sample_count'], status, now, now))
         return True
+
+    def harvest_session_habits(self, lookback_days=21, min_days=3, min_minutes_per_day=20, now=None):
+        from datetime import timedelta
+        from zoneinfo import ZoneInfo
+        from .report_evidence import trusted_session_rows, clipped_sessions
+        from .time_display import chinese_label
+        now = now or datetime.now(timezone.utc)
+        tz = ZoneInfo('Asia/Shanghai')
+        end = now.astimezone(tz)
+        start = end - timedelta(days=int(lookback_days))
+        rows = trusted_session_rows(self.db, start, end, self.noise_entities, self.non_occupancy_entities)
+        totals = {}
+        day = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        while day < end:
+            day_rows = clipped_sessions(rows, max(day, start), min(day + timedelta(days=1), end))
+            rooms = {}
+            for row in day_rows:
+                if row['type'] not in ('room_activity', 'presence', 'pass_by'):
+                    continue
+                value = rooms.setdefault(row['room'], [0, 0])
+                value[0] += row['duration_seconds']
+                value[1] += 1
+            for room, (seconds, count) in rooms.items():
+                if seconds < min_minutes_per_day * 60:
+                    continue
+                entry = totals.setdefault(room, {'days': 0, 'seconds': 0, 'sessions': 0})
+                entry['days'] += 1
+                entry['seconds'] += seconds
+                entry['sessions'] += count
+            day += timedelta(days=1)
+        eligible = {room: item for room, item in totals.items() if item['days'] >= min_days}
+        stamp = now.astimezone(timezone.utc).isoformat()
+        created, suggestions = ([], [])
+        with self.db.connect() as con:
+            existing = list(con.execute("SELECT * FROM memories WHERE type='room_habit' ORDER BY id"))
+            by_room = {}
+            for row in existing:
+                match = re.search('「([^」]+)」', row['content'])
+                if match:
+                    by_room.setdefault(match[1], []).append(row)
+            rejected = {room for room, values in by_room.items() if any((row['status'] == 'rejected' for row in values))}
+            for room, values in by_room.items():
+                if room not in eligible:
+                    for row in values:
+                        if row['status'] != 'rejected':
+                            con.execute("UPDATE memories SET status='obsolete',updated_at=? WHERE id=?", (stamp, row['id']))
+            active = []
+            for room, item in sorted(eligible.items(), key=lambda pair: -pair[1]['seconds']):
+                if room in rejected:
+                    continue
+                content = f"程序观察（未经房主确认）：「{room}」在 {chinese_label(start.isoformat())} 至 {chinese_label(end.isoformat())} 的北京日中，有 {item['days']} 天占用不少于 {min_minutes_per_day} 分钟；可信区间合计 {round(item['seconds'] / 3600, 1)} 小时。已截窗并合并同房间重叠，不推断人员身份或因果。"
+                confidence = min(0.95, 0.55 + 0.05 * item['days'])
+                old = by_room.get(room, [])
+                if old:
+                    con.execute("UPDATE memories SET content=?,confidence=?,sample_count=?,status='observed',updated_at=? WHERE id=?", (content, confidence, item['days'], stamp, old[-1]['id']))
+                    for stale in old[:-1]:
+                        con.execute("UPDATE memories SET status='obsolete',updated_at=? WHERE id=?", (stamp, stale['id']))
+                elif len(created) < 2:
+                    cur = con.execute("INSERT INTO memories(pattern_id,type,content,confidence,sample_count,status,created_at,updated_at) VALUES(NULL,'room_habit',?,?,?,'observed',?,?)", (content, confidence, item['days'], stamp, stamp))
+                    created.append((cur.lastrowid, room))
+                else:
+                    continue
+                active.append((room, content, confidence, item['days']))
+            for row in con.execute("SELECT * FROM automation_suggestions WHERE pattern_id IS NULL AND status='proposed'").fetchall():
+                try:
+                    evidence = json.loads(row['evidence_json'])
+                    room = next((x.get('room') for x in evidence if x.get('kind') == 'session_habit'))
+                except (ValueError, TypeError, StopIteration, AttributeError):
+                    continue
+                match = next((x for x in active if x[0] == room), None)
+                if not match:
+                    con.execute("UPDATE automation_suggestions SET status='obsolete' WHERE id=?", (row['id'],))
+                else:
+                    con.execute('UPDATE automation_suggestions SET description=?,confidence=?,sample_count=?,evidence_json=? WHERE id=?', (match[1], match[2], match[3], json.dumps([{'kind': 'session_habit', 'room': room, 'as_of': stamp}], ensure_ascii=False), row['id']))
+            if created:
+                room = created[0][1]
+                match = next((x for x in active if x[0] == room))
+                title = f'复核「{room}」相关自动化是否贴合作息'
+                if not con.execute('SELECT 1 FROM automation_suggestions WHERE title=?', (title,)).fetchone():
+                    con.execute("INSERT INTO automation_suggestions(pattern_id,title,description,evidence_json,confidence,sample_count,status,created_at) VALUES(NULL,?,?,?,?,?,'proposed',?)", (title, match[1], json.dumps([{'kind': 'session_habit', 'room': room, 'as_of': stamp}], ensure_ascii=False), match[2], match[3], stamp))
+                    suggestions.append(title)
+        logger.info('session observations refreshed created=%s suggestions=%s', len(created), len(suggestions))
+        return (created, suggestions)

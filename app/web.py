@@ -354,10 +354,12 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
         return [_pattern(row, local_tz) for row in rows]
 
     def memory_list(limit=200, offset=0, status=None):
-        if status and status not in PATTERN_STATUSES:
+        if status and status not in (*PATTERN_STATUSES, 'observed', 'active'):
             raise HTTPException(400, 'invalid memory status')
         where = 'WHERE status=?' if status else ''
         params = [status] if status else []
+        if status == 'active':
+            where, params = ("WHERE status IN ('confirmed','observed')", [])
         params.extend([min(max(limit, 1), 200), max(offset, 0)])
         rows = db.rows(f'SELECT * FROM memories {where} ORDER BY datetime(updated_at) DESC,id DESC LIMIT ? OFFSET ?', params)
         for row in rows:
@@ -387,12 +389,16 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
         return f'{first.month}月{first.day}日 {first:%H:%M}–{last.month}月{last.day}日 {last:%H:%M}'
 
     def promote_report_fields(detail):
+        detail['unavailable_windows'] = []
         summary = detail.get('summary')
         if not isinstance(summary, dict):
             return
         detail['generation_status'] = summary.pop('generation_status', None)
         detail['analysis_scope'] = summary.pop('analysis_scope', None)
         detail['error_type'] = summary.pop('error_type', None)
+        coverage = summary.pop('report_coverage', {})
+        detail['report_coverage'] = coverage if isinstance(coverage, dict) else {}
+        detail['unavailable_windows'] = [item for item in detail['report_coverage'].get('windows', []) if isinstance(item, dict) and item.get('status') == 'unavailable']
         detail['legacy_shape'] = False
         detail['reference_model'] = summary.pop('reference_model', None)
         detail['reference_period'] = summary.pop('reference_period', None)
@@ -450,6 +456,7 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
             detail['summary'] = _json(detail.pop('summary_json'), {})
             detail['created_at'] = _as_timezone(detail.get('created_at'), local_tz)
             promote_report_fields(detail)
+            detail['evidence_coverage'] = detail.get('summary', {}).pop('evidence_coverage', {}) if isinstance(detail.get('summary'), dict) else {}
             detail['display_summary'] = readable_report(detail.get('summary'), db, profile)
             detail['display_body'] = report_body(detail['display_summary'])
             detail['display_metadata'] = {name: detail['display_summary'][name] for name in REPORT_DIAGNOSTIC_FIELDS if isinstance(detail['display_summary'], dict) and detail['display_summary'].get(name) not in (None, '', [], {})}
@@ -714,7 +721,7 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
             stored_cooccurrence['lookback_end_label'] = chinese_label(stored_cooccurrence.get('lookback_end'))
         remote = getattr(ollama, 'remote', None)
         third_party_status = {'enabled': remote is not None, 'models': third_party_models(), 'default_model': settings.third_party_default_model or None}
-        return {'home_assistant': {'connected': ha.connected, 'last_event': last_event, 'last_event_label': chinese_label(last_event), 'last_event_relative': _relative(states.get('last_ha_event'))}, 'ollama': {'connected': ollama_ok, 'model': ollama.model}, 'third_party': third_party_status, 'database': {'ok': database_ok, 'path': str(db.path), 'size_bytes': db.path.stat().st_size if db.path.exists() else 0}, 'maintainers': maintainer_board(), 'analyzer': {'last_period': last_period, 'last_period_label': chinese_label(last_period), 'last_period_status': last_period_status, 'last_daily': last_daily, 'last_daily_label': chinese_label(last_daily), 'last_weekly': last_weekly, 'last_weekly_label': chinese_label(last_weekly), 'learning_only': settings.learning_only, 'learning_days': learning_days, 'min_pattern_samples': min_pattern_samples, 'learning_mature': learning_mature, 'learning_ready_at': learning_ready_at, 'learning_ready_label': chinese_label(learning_ready_at), 'prompt_sha256': states.get('system_prompt_sha256'), 'period_job': period_job, 'pending_periods': pending_periods, 'regeneration': regeneration_queue(), 'distill_job': _json(states.get('distill_job_status'), {}), 'question_job': _json(states.get('question_job_status'), {})}, 'counts': {'events': events, 'total_events': db.scalar('SELECT COUNT(*) FROM events'), 'sessions': db.scalar('SELECT COUNT(*) FROM sessions'), 'candidate_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='candidate'"), 'confirmed_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='confirmed'"), 'rejected_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='rejected'"), 'memories': db.scalar("SELECT COUNT(*) FROM memories WHERE status='confirmed'"), 'suggestions': db.scalar('SELECT COUNT(*) FROM automation_suggestions')}, 'collector': {'collection_started_at': collection_started, 'collection_started_label': chinese_label(collection_started), 'monitored_domains': sorted(event_filter.domains), 'monitored_entity_count': int(states.get('monitored_entity_count', 0)), 'explicit_entity_count': configured_collect_count, 'entity_profile_enabled': profile is not None, 'entity_profile_id': profile.profile_id if profile else None, 'entity_profile_entry_count': len(profile.entities) if profile else 0, 'entity_coverage': _json(states.get('entity_coverage'), {})}, 'cooccurrence': stored_cooccurrence, 'segments': analyzer.segment_memory.buffer_state() if analyzer is not None and analyzer.segment_memory else None}
+        return {'home_assistant': {'connected': ha.connected, 'last_event': last_event, 'last_event_label': chinese_label(last_event), 'last_event_relative': _relative(states.get('last_ha_event'))}, 'ollama': {'connected': ollama_ok, 'model': ollama.model}, 'third_party': third_party_status, 'model_calls_7d': db.rows("SELECT scope,COUNT(*) AS calls,SUM(attempts) AS attempts,SUM(rejections) AS rejections,SUM(queue_ms) AS queue_ms,SUM(call_ms) AS call_ms,SUM(CASE WHEN outcome='succeeded' THEN 1 ELSE 0 END) AS succeeded FROM model_calls WHERE started_at>=? GROUP BY scope", ((datetime.now(timezone.utc) - timedelta(days=7)).isoformat(),)), 'database': {'ok': database_ok, 'path': str(db.path), 'size_bytes': db.path.stat().st_size if db.path.exists() else 0}, 'maintainers': maintainer_board(), 'analyzer': {'last_period': last_period, 'last_period_label': chinese_label(last_period), 'last_period_status': last_period_status, 'last_daily': last_daily, 'last_daily_label': chinese_label(last_daily), 'last_weekly': last_weekly, 'last_weekly_label': chinese_label(last_weekly), 'learning_only': settings.learning_only, 'learning_days': learning_days, 'min_pattern_samples': min_pattern_samples, 'learning_mature': learning_mature, 'learning_ready_at': learning_ready_at, 'learning_ready_label': chinese_label(learning_ready_at), 'prompt_sha256': states.get('system_prompt_sha256'), 'period_job': period_job, 'pending_periods': pending_periods, 'regeneration': regeneration_queue(), 'distill_job': _json(states.get('distill_job_status'), {}), 'question_job': _json(states.get('question_job_status'), {})}, 'counts': {'events': events, 'total_events': db.scalar('SELECT COUNT(*) FROM events'), 'sessions': db.scalar('SELECT COUNT(*) FROM sessions'), 'candidate_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='candidate'"), 'confirmed_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='confirmed'"), 'rejected_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='rejected'"), 'memories': db.scalar("SELECT COUNT(*) FROM memories WHERE status='confirmed'"), 'suggestions': db.scalar('SELECT COUNT(*) FROM automation_suggestions')}, 'collector': {'collection_started_at': collection_started, 'collection_started_label': chinese_label(collection_started), 'monitored_domains': sorted(event_filter.domains), 'monitored_entity_count': int(states.get('monitored_entity_count', 0)), 'explicit_entity_count': configured_collect_count, 'entity_profile_enabled': profile is not None, 'entity_profile_id': profile.profile_id if profile else None, 'entity_profile_entry_count': len(profile.entities) if profile else 0, 'entity_coverage': _json(states.get('entity_coverage'), {})}, 'cooccurrence': stored_cooccurrence, 'segments': analyzer.segment_memory.buffer_state() if analyzer is not None and analyzer.segment_memory else None}
 
     def apply_feedback(pattern_id, action, note=None):
         if action not in {'confirm', 'reject'}:
@@ -1121,7 +1128,7 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
 
     @router.get('/memories', response_class=HTMLResponse, dependencies=auth)
     def memories_page(request: Request):
-        return templates.TemplateResponse(request=request, name='memories.html', context={'memories': memory_list(status='confirmed'), 'active': 'memories'})
+        return templates.TemplateResponse(request=request, name='memories.html', context={'memories': memory_list(status='active'), 'active': 'memories'})
 
     @router.get('/daily', response_class=HTMLResponse, dependencies=auth)
     async def daily_page(request: Request, day: str | None=None, model: str | None=None):
@@ -1174,8 +1181,15 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
         if questions is None:
             return question_redirect('unavailable')
         fields = await form_fields(request)
+        option = str(fields.get('option') or '').strip()
+        note = str(fields.get('answer') or '').strip()
+        answer = option if option else note
+        if option and note:
+            answer = f'{option}；{note}'[:1000]
+        if not answer:
+            return question_redirect('missing')
         try:
-            questions.answer(int(fields.get('question_id') or 0), fields.get('answer', ''), fields.get('answer_scope') or 'all')
+            questions.answer(int(fields.get('question_id') or 0), answer, fields.get('answer_scope') or 'all')
         except ValueError as error:
             text = str(error)
             status = 'slot_needs_period' if '时段' in text else 'already' if '已经回答' in text else 'missing' if '未找到' in text else 'invalid'

@@ -262,6 +262,13 @@ code{padding:.16em .38em;border-radius:6px;background:var(--surface-2);font-fami
 
 .guidance-form,.question-form{gap:12px}
 .guidance-form label,.question-form label{font-size:.86rem;font-weight:600}
+.question-options{gap:10px}
+.option-label{
+  border-radius:16px;
+  background:var(--apple-surface-solid);
+  box-shadow:0 1px 2px rgba(0,0,0,.03);
+}
+.option-label:hover{background:var(--apple-surface-raised)}
 .guidance-form textarea,.guidance-form select,.guidance-form input,
 .question-form textarea,.question-form select,.filters input,.filters select,.model-picker select{
   min-height:42px;

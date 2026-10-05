@@ -20,6 +20,10 @@ async def check():
         os.chdir(folder)
         os.environ.update(DATABASE_PATH=str(Path(folder)/'example.db'),
                           LOG_PATH=str(Path(folder)/'example.log'), BACKUP_DIR=str(Path(folder)/'backups'))
+        # A user allowlist does not need to duplicate packaged model prompts.
+        config = Path(folder)/'entities.yaml'
+        config.write_text('domains: [light]\ninclude_entities: [light.example_lamp]\n', encoding='utf-8')
+        os.environ['CONFIG_PATH'] = str(config)
         try:
             import httpx
             from app.main import create_app
@@ -39,6 +43,10 @@ async def check():
                 assert (await client.post('/api/maintainers', json={'name': 'synthetic-test'})).status_code == 403
                 assert (await client.post('/api/maintainers', json={'name': 'synthetic-test'},
                                    headers={'origin': 'http://testserver'})).status_code == 200
+                from app.runtime import db, scheduler
+                assert not scheduler.running
+                assert db.scalar('SELECT COUNT(*) FROM model_calls') == 0
+                assert db.scalar('SELECT COUNT(*) FROM movements') == 0
             print('PASS: 14 offline routes; Host and cross-origin write boundaries; no network')
         finally:
             logging.shutdown()

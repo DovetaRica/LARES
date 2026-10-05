@@ -88,7 +88,10 @@ async def validated_model_report(call_model, system_prompt, payload, retry_instr
     validate = validator or validate_report_response
     budget = int(attempts or MODEL_ATTEMPTS)
     for attempt in range(max(1, budget)):
+        from .model_metrics import note_attempt
+        note_attempt()
         content, metadata = await call_model(system_prompt + (retry_instruction if attempt else ''))
+        note_attempt(metadata)
         try:
             result = validate(parse_model_json(content))
             if check_identity:
@@ -98,6 +101,7 @@ async def validated_model_report(call_model, system_prompt, payload, retry_instr
                 validate_identity_references(result, payload)
             return (result, metadata)
         except _FORMAT_FAILURES as error:
+            note_attempt(rejected=True)
             reason = getattr(error, 'code', 'invalid_json_shape')
             if attempt + 1 < budget:
                 logger.warning('model response rejected; retrying once error=%s reason=%s', type(error).__name__, reason)

@@ -11,3 +11,4 @@ global-exclude *.pyc
 
 recursive-include app *.py *.html *.css *.js *.svg *.yaml *.json *.txt
 recursive-include runtime_tests *.py
+recursive-include runtime_tests/fixtures *.sql

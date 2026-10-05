@@ -8,13 +8,13 @@ Automation handles the routine. LARES helps investigate the unknown.
 
 An observation-first exception intelligence layer for Home Assistant. Keep existing automation independent, inspect ambiguous events, and turn repeated manual corrections into review candidates.
 
-**Status: v0.2.0-alpha.1 — experimental, shadow mode only.**
+**Status: v0.2.1 — observation-only local application.**
 
 [中文](README.zh-CN.md) · [Architecture](docs/architecture.md) · [Deployment](docs/deployment.md) · [Privacy](docs/privacy.md) · [Agent install](docs/ai-install.md) · [Contributor guide](AGENTS.md)
 
 ## New optional application preview
 
-Version 0.2 adds the extracted local dashboard, layered memory/report orchestration and streaming statistics. Install with `python -m pip install ".[app]"`, run `python -m app.demo`, then `lares-app --demo` for a temporary synthetic UI. See [application setup and limits](docs/application.md) and [extraction notes](docs/extraction-v02.md). This candidate is prepared locally; GitHub may still serve alpha.3 until publication.
+Version 0.2 adds the extracted local dashboard, layered memory/report orchestration and streaming statistics. Install with `python -m pip install ".[app]"`, run `python -m app.demo`, then `lares-app --demo` for a temporary synthetic UI. See [application setup and limits](docs/application.md) and [extraction notes](docs/extraction-v02.md). The 0.2.1 patch adds report coverage/budget repairs, model-call statistics, persistent direction confirmation and the Rhine theme. See [release compatibility and limits](docs/release-v021.md).
 
 ## Try without a home, token, model, or network
 

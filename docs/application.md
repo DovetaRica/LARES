@@ -1,9 +1,9 @@
-# LARES application preview (0.2)
+# LARES optional application (0.2.1)
 
 The optional application adds a Chinese local UI, persistent event storage, deterministic
 segment preprocessing, evidence-based candidate memory, room sessions, six-hour/daily/weekly
 report orchestration and optional model comparison. The existing `home-ai` CLI is unchanged.
-This is a newly extracted alpha; production deployment history is not public-package validation.
+Public-package checks use synthetic data; production deployment history is not validation of this release.
 
 ## Install and try offline
 
@@ -22,7 +22,7 @@ temperature and light events, disables networking and scheduling, and removes th
 files on normal exit. It does not generate model-authored reports. To use another local port,
 pass `--port 8088`.
 
-For a wheel installation, use `python -m pip install "./home_ai_exceptions-0.2.0a1-py3-none-any.whl[app]"`.
+For a wheel installation, use `python -m pip install "./home_ai_exceptions-0.2.1-py3-none-any.whl[app]"`.
 Templates, static files, generic prompts and example configuration are inside the wheel.
 Installing dependencies requires network access; the demos themselves do not.
 The lock file records tested transitive versions for the Python 3.12 preview. The build tools
@@ -34,7 +34,9 @@ are not claimed.
 Run `lares-app` from a new, dedicated directory to create `data/`, `logs/` and later backups.
 The optional application reads that directory's `.env` and environment variables. This differs
 from the original dependency-free CLI. Do not run it from an existing production workspace or
-point `DATABASE_PATH` at an existing installation: no in-place upgrade is validated here.
+point `DATABASE_PATH` at an existing installation during a demo. Only the additive upgrade from
+the public v0.2.0-alpha.1 schema is regression tested with synthetic data; production upgrades
+require a separate backup and review. See [v0.2.1 compatibility](release-v021.md).
 
 The application binds to loopback; Host validation and same-origin write checks are enabled.
 It is not a publicly hosted service. The UI supports optional Basic authentication via

@@ -87,6 +87,8 @@ class HAClient:
                         self.db.set_state('entity_coverage', json.dumps(self.filter.coverage(states), ensure_ascii=False))
                         if self.sleep_tracker is not None:
                             self.sleep_tracker.seed_state(states)
+                        if self.arrival_tracker is not None:
+                            self.arrival_tracker.seed_state(states)
                         if self.sessions is not None:
                             self.sessions.seed_state(states, getattr(self.filter, 'presence_classes', ()), getattr(self.filter, 'profile', None))
                         subscription_id = await self._refresh_vacuum_context(ws, states)

@@ -55,6 +55,60 @@ button.is-busy::after,.button.is-busy::after{content:"";display:inline-block;wid
 .desktop-nav>a:hover{color:var(--text)}
 .desktop-nav>a[aria-current=page]{color:var(--text);background:transparent}
 .question-form{display:grid;gap:10px;margin-top:12px}
+.question-options{display:grid;gap:8px;border:0;padding:0;margin:0}
+.question-options legend{font-size:.82rem;font-weight:700;padding:0 0 4px}
+/* Choice cards: large tap targets like a picker, not tiny radios. */
+.option-label{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-height:44px;
+  padding:11px 14px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:var(--surface);
+  font-weight:500;
+  font-size:.95rem;
+  line-height:1.35;
+  cursor:pointer;
+  transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease;
+}
+.option-label:hover{border-color:color-mix(in srgb,var(--blue) 45%,var(--border))}
+.option-label input{
+  position:absolute;
+  opacity:0;
+  width:1px;
+  height:1px;
+  margin:0;
+  pointer-events:none;
+}
+.option-label::before{
+  content:"";
+  flex:none;
+  width:16px;
+  height:16px;
+  border:1.5px solid var(--border);
+  border-radius:50%;
+  background:var(--bg);
+  box-shadow:inset 0 0 0 3px var(--surface);
+}
+.option-label:has(input:checked){
+  border-color:var(--blue);
+  background:color-mix(in srgb,var(--blue) 10%,var(--surface));
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--blue) 35%,transparent);
+}
+.option-label:has(input:checked)::before{
+  border-color:var(--blue);
+  background:var(--blue);
+}
+.option-label:has(input:focus-visible){
+  outline:2px solid var(--blue);
+  outline-offset:2px;
+}
+@media(min-width:560px){
+  .question-options{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+}
 .question-form label{display:grid;gap:5px;font-weight:800;font-size:.86rem}
 .question-form textarea,.question-form select{width:100%;padding:11px;border:1px solid var(--border);border-radius:12px;background:var(--bg);color:var(--text);font:inherit}
 .question-form textarea{min-height:80px;resize:vertical}

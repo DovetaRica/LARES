@@ -102,6 +102,7 @@ class QuestionItem(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     question: str = Field(min_length=1, max_length=300)
     why: str = Field(default='', max_length=300)
+    options: list[str] = Field(default_factory=list, max_length=5)
 
 class QuestionResponse(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
@@ -276,7 +277,7 @@ def normalize_identity_claims(result, payload):
         normalized = {key: rewrite(item) for key, item in value.items()}
         finding = findings.get(str(normalized.get('finding_id') or ''))
         if finding is not None and isinstance(normalized.get('description'), str):
-            description = f"{finding.get('actor_label')}与{finding.get('sensor_label')}在历史数据中呈统计共现；这不代表因果，也不能说明本次实际清扫房间。"
+            description = f"{finding.get('actor_label')}与{finding.get('sensor_label')}在历史数据中呈统计共现（相关非因果，仅供观察）。"
             if normalized['description'] != description:
                 normalized['description'] = description
                 changed += 1

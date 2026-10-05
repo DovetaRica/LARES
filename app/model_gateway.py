@@ -1,7 +1,18 @@
+from functools import wraps
+from .model_metrics import tracked_call, trace
+
+def account(method):
+
+    @wraps(method)
+    async def wrapper(self, system_prompt, payload, model=None, **kwargs):
+        return await tracked_call(self.database, method.__name__, payload, system_prompt, model or self.model, lambda: method(self, system_prompt, payload, model=model, **kwargs))
+    return wrapper
+
 class ModelGateway:
     provider = 'gateway'
 
     def __init__(self, local, remote=None, automatic_model=''):
+        self.database = None
         self.local = local
         self.remote = None
         self.model = local.model
@@ -43,19 +54,28 @@ class ModelGateway:
         client, _ = await self._resolve(model)
         return str(getattr(client, 'provider', ''))
 
+    @account
     async def analyze(self, system_prompt, payload, model=None, context_tokens=None):
         client, chosen = await self._resolve(model)
+        if trace.get() is not None:
+            trace.get()['model'] = str(chosen)[:120]
         if context_tokens is None:
             return await client.analyze(system_prompt, payload, model=chosen)
         return await client.analyze(system_prompt, payload, model=chosen, context_tokens=context_tokens)
 
+    @account
     async def analyze_questions(self, system_prompt, payload, model=None):
         client, chosen = await self._resolve(model)
+        if trace.get() is not None:
+            trace.get()['model'] = str(chosen)[:120]
         return await client.analyze_questions(system_prompt, payload, model=chosen)
 
+    @account
     async def analyze_segment(self, system_prompt, payload, model=None, context_tokens=None, wall_seconds=None):
         client, chosen = await self._resolve(model)
         segment_client = getattr(client, 'analyze_segment', None)
+        if trace.get() is not None:
+            trace.get()['model'] = str(chosen)[:120]
         if segment_client is None:
             return await client.analyze(system_prompt, payload, model=chosen)
         return await segment_client(system_prompt, payload, model=chosen, context_tokens=context_tokens, wall_seconds=wall_seconds)

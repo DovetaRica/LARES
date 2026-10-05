@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     segments_enabled: bool = True
     segments_ai: bool = False
     segments_ai_mode: str = 'off'
+    automatic_distillation: bool = False
     segment_max_events: int = Field(default=400, ge=10)
     segment_max_tokens: int = Field(default=4000, ge=500)
     segment_max_minutes: int = Field(default=60, ge=5)

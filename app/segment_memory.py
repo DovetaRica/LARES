@@ -35,7 +35,7 @@ class SegmentMemory:
         self.enabled = bool(getattr(settings, 'segments_enabled', True))
         mode = str(getattr(settings, 'segments_ai_mode', '') or '').strip().lower()
         if mode not in ('off', 'hybrid', 'full'):
-            mode = 'full' if bool(getattr(settings, 'segments_ai', False)) else 'hybrid'
+            mode = 'full' if bool(getattr(settings, 'segments_ai', False)) else 'off'
         self.ai_mode = mode
         self.use_ai = mode != 'off'
         self.max_events = int(settings.segment_max_events)
@@ -202,6 +202,8 @@ class SegmentMemory:
 
     async def _enrich_with_hybrid_ai(self, segment, events, preprocessed, critical):
         payload = self._hybrid_ai_payload(segment, events, preprocessed, critical)
+        if not payload.get('compressed_events') and (not payload.get('critical_events')):
+            return None
         prompt_tokens = conservative_token_estimate(self.prompt) + conservative_token_estimate(compact_json(payload))
         wall_seconds = segment_call_wall_seconds(prompt_tokens)
         started = time.perf_counter()
@@ -236,6 +238,7 @@ class SegmentMemory:
         if self.ai_mode == 'hybrid':
             critical = detect_critical(events, preprocessed)
             extra = None
+            self._store_level1_slice(segment_id, events, preprocessed, critical=critical)
             if summarize:
                 segment = self.db.rows('SELECT * FROM event_segments WHERE id=?', (segment_id,))[0]
                 extra = await self._enrich_with_hybrid_ai(segment, events, preprocessed, critical)
@@ -258,6 +261,7 @@ class SegmentMemory:
                 preprocessed = preprocess(events, range_end=row['period_end'])
                 if self.ai_mode == 'hybrid':
                     critical = detect_critical(events, preprocessed)
+                    self._store_level1_slice(row['id'], events, preprocessed, critical=critical)
                     extra = await self._enrich_with_hybrid_ai(row, events, preprocessed, critical)
                     self._store_level1_slice(row['id'], events, preprocessed, critical=critical, extra=extra)
                 else:

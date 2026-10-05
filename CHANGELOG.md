@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+- Repair daily/weekly scope, evidence coverage, bounded report context and overlap clipping.
+- Persist deterministic Level-1 facts before optional model prose; disable automatic distillation by default.
+- Add content-free model-call accounting and seven-day aggregates.
+- Make doorway direction and short-trip confirmation restart-safe and transactionally consistent.
+- Add generic synthetic topology configuration and cautious spatial candidates; no private graph imported.
+- Update the local application to the Rhine theme and include question-choice schema compatibility.
+- Preserve networking/scheduling opt-ins, local request boundaries and the original CLI.
+
+
 ## 0.2.0-alpha.1 (local extraction candidate)
 
 - Add optional local application UI, layered-memory/report and evidence-learning modules.

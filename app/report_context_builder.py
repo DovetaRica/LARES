@@ -27,7 +27,7 @@ def _uncovered_ranges(segments, window_first_id, window_last_id):
 
 def _fetch_range_events(db, start_id, end_id):
     return db.rows('SELECT id,ts,entity_id,domain,category,event_type,old_state,new_state,source,area,attributes_json,metadata_json FROM events WHERE id>=? AND id<=? ORDER BY id', (start_id, end_id))
-AUTOMATION_RUNS_LIMIT = 16
+AUTOMATION_RUNS_LIMIT = 6
 OCCUPANCY_PRESENCE_LIMIT = 8
 OCCUPANCY_DOOR_LIMIT = 8
 OCCUPANCY_NOISE_LIMIT = 6
@@ -145,8 +145,7 @@ def _segment_block(segment):
         if isinstance(crit, list) and crit:
             block['critical'] = crit[:CRITICAL_PER_SEGMENT]
         if body.get('ai_summary'):
-            block['ai_summary'] = str(body.get('ai_summary'))[:MEMORY_SUMMARY_CHARS]
-            block['summary'] = block['ai_summary']
+            block['summary'] = str(body.get('ai_summary'))[:MEMORY_SUMMARY_CHARS]
     return block
 
 def _recent_detail(events, end_local, minutes, identities=None, suspect_entities=(), noise_entities=(), non_occupancy_entities=()):
@@ -160,81 +159,21 @@ def _recent_detail(events, end_local, minutes, identities=None, suspect_entities
     return preprocessed.compressed
 
 async def build_window_payload(analyzer, start_local, end_local, scope, caps=None):
-    db, tz = (analyzer.db, analyzer.tz)
-    start_utc = start_local.astimezone(timezone.utc).isoformat()
-    end_utc = end_local.astimezone(timezone.utc).isoformat()
-    segment_memory = getattr(analyzer, 'segment_memory', None)
-
-    async def with_current_snapshot(payload):
-        ha = getattr(analyzer, 'ha', None)
-        if ha is None:
-            return payload
+    payload = analyzer._window_payload(start_local, end_local, scope, caps=caps)
+    memory = getattr(analyzer, 'segment_memory', None)
+    if memory is not None and memory.enabled:
+        start = start_local.astimezone(timezone.utc).isoformat()
+        end = end_local.astimezone(timezone.utc).isoformat()
+        segments = _succeeded_segments(analyzer.db, start, end)
+        if segments:
+            payload['memory_segments'] = [_segment_block(row) for row in segments]
+            events = analyzer.db.rows('SELECT * FROM events WHERE datetime(ts)>=datetime(?) AND datetime(ts)<datetime(?) ORDER BY datetime(ts),id', (start, end))
+            from .event_preprocessor import detect_incomplete_entities
+            suspects = detect_incomplete_entities(events + next_events_after(analyzer.db, end))
+            payload['recent_detail'] = _recent_detail(events, end_local, memory.recent_detail_minutes, identities=analyzer._identity_map(events), suspect_entities=suspects, noise_entities=analyzer.presence_noise_entities, non_occupancy_entities=getattr(analyzer, 'presence_non_occupancy_entities', frozenset()))
+    ha = getattr(analyzer, 'ha', None)
+    if ha is not None:
         states = await ha.current_states()
         if states:
-            payload['home_state_snapshot'] = {'taken_at': datetime.now(tz).isoformat(), 'note': '以下状态拍摄于报告生成时刻，只代表生成当时，不代表报告时段内一直如此，也不一定等于时段结束瞬间。', 'entities': ha.compact_snapshot(states)}
-        return payload
-    if segment_memory is None or not segment_memory.enabled:
-        return await with_current_snapshot(analyzer._window_payload(start_local, end_local, scope, caps=caps))
-    window_meta = db.rows('SELECT id,ts FROM events WHERE datetime(ts)>=datetime(?) AND datetime(ts)<datetime(?) ORDER BY id', (start_utc, end_utc))
-    if not window_meta:
-        return await with_current_snapshot(analyzer._window_payload(start_local, end_local, scope, caps=caps))
-    window_first_id, window_last_id = (window_meta[0]['id'], window_meta[-1]['id'])
-    segments = _succeeded_segments(db, start_utc, end_utc)
-    if not segments:
-        return await with_current_snapshot(analyzer._window_payload(start_local, end_local, scope, caps=caps))
-    caps = caps or analyzer.REGULAR_CAPS
-    uncovered = _uncovered_ranges(segments, window_first_id, window_last_id)
-    uncovered_events = []
-    for start_id, end_id in uncovered:
-        uncovered_events.extend(_fetch_range_events(db, start_id, end_id))
-    all_window_events = _fetch_range_events(db, window_first_id, window_last_id)
-    identities = analyzer._identity_map(all_window_events)
-    from .event_preprocessor import detect_incomplete_entities
-    suspects = detect_incomplete_entities(all_window_events + next_events_after(db, end_utc))
-    session_exclusions = _session_exclusions(db, start_utc, end_utc, suspects, getattr(analyzer, 'presence_noise_entities', frozenset()) | getattr(analyzer, 'presence_non_occupancy_entities', frozenset()))
-    collection_start = db.scalar("SELECT value FROM system_state WHERE key='collection_started_at'") or start_utc
-    sessions = db.rows('SELECT id,room,type,start_ts,end_ts,duration_seconds,status FROM sessions WHERE datetime(start_ts)<datetime(?) AND (end_ts IS NULL OR datetime(end_ts)>=datetime(?)) ORDER BY COALESCE(duration_seconds,0) DESC LIMIT ?', (end_utc, start_utc, caps['sessions']))
-    patterns = db.rows('SELECT id,type,description,confidence,sample_count,status FROM patterns ORDER BY confidence DESC LIMIT ?', (caps['patterns'],))
-    cooccurrence = analyzer._cooccurrence_payload(end_local)
-    from .robot_presence import build_annotations
-    robot_presence = build_annotations(all_window_events, cooccurrence['full'], analyzer._identity, caps['robot_presence_annotations'], incomplete_entities=suspects)
-    memory_segments = [_segment_block(segment) for segment in segments]
-    groups = analyzer._event_groups(uncovered_events, limit=caps['event_groups'])
-    evidence_by_id = {group['evidence_id']: {'evidence_id': group['evidence_id'], 'semantic_key': group['semantic_key'], 'status': 'reported', 'sample_count': group['count'], 'local_days': group['local_days'], 'first_ts': group['first_ts'], 'last_ts': group['last_ts'], 'states': group['states']} for group in groups}
-    for group in groups:
-        group['first_ts'] = analyzer._local_time(group['first_ts'])
-        group['last_ts'] = analyzer._local_time(group['last_ts'])
-    representative = analyzer._representative_events(uncovered_events, limit=caps['representative_events'])
-    important = [{key: analyzer._local_time(event.get(key)) if key == 'ts' else event.get(key) for key in ('category', 'event_type', 'source', 'entity_id', 'area', 'new_state', 'ts')} for event in representative]
-    for item, event in zip(important, representative):
-        item.update(analyzer._identity(event))
-    from .critical_events import detect as detect_critical
-    pre_uncovered = None
-    pool = detect_critical(uncovered_events)
-    for segment in segments:
-        try:
-            stored = json.loads(segment.get('critical_events_json') or '[]')
-        except ValueError:
-            stored = []
-        for item in stored:
-            pool.append(item)
-    pool.sort(key=lambda item: (-item.get('score', 0), item.get('ts') or ''))
-    seen, critical_pool = (set(), [])
-    for item in pool:
-        key = (item.get('rule'), item.get('entity_id'), item.get('ts'))
-        if key in seen:
-            continue
-        seen.add(key)
-        critical_pool.append(item)
-    critical_pool = critical_pool[:CRITICAL_POOL_LIMIT]
-    recent_detail = _recent_detail(all_window_events, end_local, segment_memory.recent_detail_minutes, identities=identities, suspect_entities=suspects, noise_entities=analyzer.presence_noise_entities, non_occupancy_entities=getattr(analyzer, 'presence_non_occupancy_entities', frozenset()))
-    from .event_preprocessor import preprocess
-    pre_uncovered = preprocess(uncovered_events, range_end=end_utc, noise_entities=analyzer.presence_noise_entities, identities=identities, suspect_entities=suspects, non_occupancy_entities=getattr(analyzer, 'presence_non_occupancy_entities', frozenset()))
-    occupancy_block = occupancy_summary_block(pre_uncovered, uncovered_events)
-    occupancy_block['systemic_locks'] = pre_uncovered.systemic_windows
-    occupancy_block['non_occupancy'] = pre_uncovered.non_occupancy[:8]
-    occupancy_block.setdefault('notes', {})['excluded_sessions'] = f'另有 {len(session_exclusions)} 个在场会话因来源传感器信号不可靠（噪声/不完整/系统性误报）未纳入本次分析，避免误报停留时长'
-    automation_runs = pre_uncovered.automation_runs
-    movements = analyzer._movements_in_window(start_local, end_local)
-    payload = {'analysis_scope': scope, 'period_start': start_local.isoformat(), 'period_end': end_local.isoformat(), 'total_events': len(all_window_events), 'event_counts': analyzer._counts(all_window_events), 'memory_segments': memory_segments, 'critical_events': critical_pool, 'recent_detail': recent_detail, 'movements': movements, 'occupancy_summary': occupancy_block, 'automation_runs': automation_runs[:AUTOMATION_RUNS_LIMIT], 'robot_presence_annotations': robot_presence, 'event_groups': groups, 'representative_events': important, 'entity_identity_catalog': analyzer._identity_catalog(uncovered_events or all_window_events), 'metric_summaries': analyzer._metric_summaries(uncovered_events, limit=caps['metric_summaries'], identities=identities), 'user_guidance': analyzer._window_guidance(scope, start_local), 'reviewed_pattern_feedback': analyzer._reviewed_feedback(), 'timezone': 'Asia/Shanghai (UTC+08:00, Beijing Time)', 'sessions': [{**row, 'room': analyzer._session_room(row.get('room'))} for row in _filtered_sessions([row for row in analyzer._localize_rows(sessions, ('start_ts', 'end_ts')) if not session_inside_systemic_window(row, pre_uncovered.systemic_windows)], session_exclusions)], 'existing_patterns': patterns, 'deterministic_anomalies': analyzer._localize_rows(analyzer.anomaly_detector.detect(end_local.astimezone(timezone.utc)), ('first_seen', 'last_seen')), 'cooccurrence_findings': cooccurrence['compact'], 'cooccurrence_findings_full': cooccurrence['full'], 'cooccurrence_meta': cooccurrence['meta'], '_evidence_by_id': evidence_by_id}
-    return await with_current_snapshot(payload)
+            payload['home_state_snapshot'] = {'taken_at': datetime.now(analyzer.tz).isoformat(), 'note': '生成时刻快照，不代表报告窗口内事实，不得用于判断过去窗口设备是否运行。', 'entities': ha.compact_snapshot(states)}
+    return payload

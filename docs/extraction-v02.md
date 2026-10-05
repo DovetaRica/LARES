@@ -28,3 +28,13 @@ No production files, configuration, services or databases are changed by extract
 
 Local tags and version folders do not publish to GitHub. Uploading the candidate is a separate
 release step after reviewing its source, checksums and limitations.
+
+## 0.2.1 extraction update (2026-10-05)
+
+The patch imports selected runtime changes from a new fixed source commit and retains the
+public network/scheduling guards. It adds only synthetic arrival, evidence and compatibility
+tests. The spatial resource is a newly authored three-node example; context notes describe
+only supplied adjacency and uncertainty. Prompt resources load from the installed package
+independently of the local entity allowlist. No household graph or production data is copied.
+Per-file provenance remains in the ignored maintainer audit directory. Test counts and
+installation results are recorded for this public patch, separately from source-project checks.

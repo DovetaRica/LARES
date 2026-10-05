@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "nodes": {
+    "example_entry": {"label": "Example entry"},
+    "example_hall": {"label": "Example hall"},
+    "example_room": {"label": "Example room"}
+  },
+  "edges": [["example_entry", "example_hall"], ["example_hall", "example_room"]],
+  "sensors": {
+    "binary_sensor.example_entry": "example_entry",
+    "binary_sensor.example_hall": "example_hall",
+    "binary_sensor.example_room": "example_room"
+  },
+  "candidate_max_gap_seconds": 120
+}
