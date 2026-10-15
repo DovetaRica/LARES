@@ -1,4 +1,4 @@
-# LARES optional application (0.2.1)
+# LARES optional application (0.3.0)
 
 The optional application adds a Chinese local UI, persistent event storage, deterministic
 segment preprocessing, evidence-based candidate memory, room sessions, six-hour/daily/weekly
@@ -22,7 +22,7 @@ temperature and light events, disables networking and scheduling, and removes th
 files on normal exit. It does not generate model-authored reports. To use another local port,
 pass `--port 8088`.
 
-For a wheel installation, use `python -m pip install "./home_ai_exceptions-0.2.1-py3-none-any.whl[app]"`.
+For a wheel installation, use `python -m pip install "./home_ai_exceptions-0.3.0-py3-none-any.whl[app]"`.
 Templates, static files, generic prompts and example configuration are inside the wheel.
 Installing dependencies requires network access; the demos themselves do not.
 The lock file records tested transitive versions for the Python 3.12 preview. The build tools
@@ -35,8 +35,8 @@ Run `lares-app` from a new, dedicated directory to create `data/`, `logs/` and l
 The optional application reads that directory's `.env` and environment variables. This differs
 from the original dependency-free CLI. Do not run it from an existing production workspace or
 point `DATABASE_PATH` at an existing installation during a demo. Only the additive upgrade from
-the public v0.2.0-alpha.1 schema is regression tested with synthetic data; production upgrades
-require a separate backup and review. See [v0.2.1 compatibility](release-v021.md).
+the public v0.2.0-alpha.1 and v0.2.1 schemas is regression tested with synthetic data; production upgrades
+require a separate backup and review. See [v0.3.0 compatibility](release-v030.md).
 
 The application binds to loopback; Host validation and same-origin write checks are enabled.
 It is not a publicly hosted service. The UI supports optional Basic authentication via
@@ -56,6 +56,12 @@ downloaded by this package. Automatic schedules and startup backfill additionall
 `LARES_ENABLE_SCHEDULE=true`. Segment AI is off (`SEGMENTS_AI_MODE=off`); use `hybrid` explicitly
 only after validating the local model. Candidate learning defaults to observation mode
 (`LEARNING_ONLY=true`) and retains the seven-day/five-sample defaults.
+
+Report review is off (`REPORT_REVIEW_ENABLED=false`); enabling it adds one critic request and,
+only if needed, one revision after a local draft (up to four HTTP requests including format retry).
+Idle scouting is off (`PROACTIVE_ENABLED=false`); it additionally needs network and scheduling
+opt-ins, shares the ordinary model lock, and uses at most `PROACTIVE_MAX_CALLS_PER_DAY=6` reserved
+requests per day with bounded reads. Leads are unconfirmed and do not activate automations.
 
 Third-party model configuration is empty/off. Enabling it deliberately sends supplied household
 context to that provider; no private provider settings or credentials were extracted. The

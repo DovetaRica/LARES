@@ -46,7 +46,7 @@ def main():
         failures=scan_artifact(artifact)
         if failures: raise SystemExit('Artifact scan failed: '+artifact.name+'; inspect with check_public.py')
     manifest={'commit':commit,'package_version':package_version,'archive_prefix':prefix,
-              'python':sys.version.split()[0],'build_tools':{p:version(p) for p in ('build','setuptools','wheel','packaging','pyproject_hooks')},
+              'python':sys.version.split()[0],'build_tools':{p:version(p) for p in ('pip','build','setuptools','wheel','packaging','pyproject_hooks')},
               'artifacts':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in artifacts},
               'reproducibility':'Functional installation and source content; byte-identical wheels not claimed'}
     (output/'release-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')

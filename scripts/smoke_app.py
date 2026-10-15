@@ -40,10 +40,13 @@ async def check():
                 assert (await client.get('/', headers={'host': 'unexpected.example'})).status_code == 400
                 assert (await client.post('/api/maintainers', json={'name': 'synthetic-test'},
                                    headers={'origin': 'https://unexpected.example'})).status_code == 403
+                assert (await client.post('/api/maintainers', json={'name': 'synthetic-test'},
+                                   headers={'origin': 'https://testserver'})).status_code == 403
                 assert (await client.post('/api/maintainers', json={'name': 'synthetic-test'})).status_code == 403
                 assert (await client.post('/api/maintainers', json={'name': 'synthetic-test'},
                                    headers={'origin': 'http://testserver'})).status_code == 200
-                from app.runtime import db, scheduler
+                runtime = application.state.runtime
+                db, scheduler = runtime.db, runtime.scheduler
                 assert not scheduler.running
                 assert db.scalar('SELECT COUNT(*) FROM model_calls') == 0
                 assert db.scalar('SELECT COUNT(*) FROM movements') == 0

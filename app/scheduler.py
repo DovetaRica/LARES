@@ -2,7 +2,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from .backup import create_backup
 
-def make_scheduler(settings, analyzer, aggregator, database, segment_memory=None, arrival_tracker=None):
+def make_scheduler(settings, analyzer, aggregator, database, segment_memory=None, arrival_tracker=None, proactive_scout=None):
     scheduler = AsyncIOScheduler(timezone=settings.timezone)
     if arrival_tracker is not None:
         scheduler.add_job(arrival_tracker.flush_pending, 'interval', seconds=5, id='arrival_confirmation', max_instances=1, coalesce=True)
@@ -17,4 +17,6 @@ def make_scheduler(settings, analyzer, aggregator, database, segment_memory=None
     scheduler.add_job(analyzer.weekly, CronTrigger(day_of_week='mon', hour=4, minute=30, timezone=settings.timezone), id='weekly_analysis', max_instances=1, coalesce=True, misfire_grace_time=3600)
     scheduler.add_job(create_backup, CronTrigger(hour=3, minute=30, timezone=settings.timezone), args=[database, settings.backup_dir, False], id='daily_backup')
     scheduler.add_job(create_backup, CronTrigger(day_of_week='mon', hour=3, minute=45, timezone=settings.timezone), args=[database, settings.backup_dir, True], id='weekly_backup')
+    if proactive_scout is not None:
+        scheduler.add_job(proactive_scout.run, CronTrigger(hour='9-20', minute=35, timezone=settings.timezone), id='proactive_scout', max_instances=1, coalesce=True, misfire_grace_time=60)
     return scheduler

@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     ollama_model: str = 'qwen3.5:4b'
     ollama_timeout_seconds: int = 900
     model_temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+    report_review_enabled: bool = False
+    proactive_enabled: bool = False
+    proactive_max_calls_per_day: int = Field(default=6, ge=1, le=6)
     model_context_tokens: int = Field(default=12288, ge=2048)
     model_output_reserve_tokens: int = Field(default=3072, ge=256)
     model_prompt_reserve_tokens: int = Field(default=1000, ge=0)

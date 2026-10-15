@@ -1,12 +1,14 @@
 import json
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from .llm_schema import RetryableModelFormatError, validate_question_response
+from .llm_schema import MODEL_CALL_WALL_SECONDS, RetryableModelFormatError, validate_question_response
 from .question_policy import QuestionPolicy, default as default_policy
 from .time_display import chinese_label, moment
+from .question_grounding import GROUNDING_PROMPT, validate_grounded_response, program_question_reasons, question_context
 logger = logging.getLogger(__name__)
 
 def _clean_options(raw):
@@ -45,9 +47,10 @@ RETRY_SUMMARY_CHARS = 300
 
 class QuestionAgent:
 
-    def __init__(self, database, model_client, timeout_path=str(Path(__file__).parent / 'resources/prompts/questions.txt'), policy=None, settings=None):
+    def __init__(self, database, model_client, timeout_path=str(Path(__file__).parent / 'resources/prompts/questions.txt'), policy=None, settings=None, fact_query=None):
         self.db = database
         self.model = model_client
+        self.fact_query = fact_query
         self.prompt = Path(timeout_path).read_text(encoding='utf-8')
         self.policy = policy if policy is not None else default_policy()
         self.question_model = str(getattr(settings, 'question_model', '') or '')
@@ -180,7 +183,7 @@ class QuestionAgent:
 
     @staticmethod
     def _as_owner_preference(question, answer):
-        return f"{question['question']}\n房主回答：{answer}"[:1000]
+        return f'{question['question']}\n房主回答：{answer}'[:1000]
 
     @staticmethod
     def _next_slot(scope_key):
@@ -196,7 +199,7 @@ class QuestionAgent:
 
     def slot_answers(self, period_start):
         rows = self.db.rows("SELECT question,answer FROM ai_questions WHERE status='answered' AND answer_scope='slot' AND answer_target=? ORDER BY id", (period_start,))
-        return [{'id': None, 'scope': 'period', 'source': 'owner', 'content': f"{row['question']}\n房主回答：{row['answer']}"[:1000], 'created_at': None} for row in rows]
+        return [{'id': None, 'scope': 'period', 'source': 'owner', 'content': f'{row['question']}\n房主回答：{row['answer']}'[:1000], 'created_at': None} for row in rows]
 
     def skip(self, question_id):
         with self.db.connect() as con:
@@ -264,7 +267,7 @@ class QuestionAgent:
             return []
 
     def _record_job(self, source, proposed, stored, dropped):
-        state = {'status': 'succeeded', 'source': source, 'proposed': proposed, 'stored': stored, 'retried': bool(dropped.get('retried')), 'duplicate_dropped': dropped.get('duplicate', 0), 'artifact_dropped': dropped.get('artifact', 0), 'policy_dropped': dropped.get('policy', 0), 'quota_dropped': dropped.get('quota', 0), 'empty_dropped': dropped.get('empty', 0), 'finished_at': datetime.now(timezone.utc).isoformat()}
+        state = {'status': 'failed' if dropped.get('failed') else 'succeeded', 'source': source, 'proposed': proposed, 'stored': stored, 'retried': bool(dropped.get('retried')), 'duplicate_dropped': dropped.get('duplicate', 0), 'artifact_dropped': dropped.get('artifact', 0), 'policy_dropped': dropped.get('policy', 0), 'quota_dropped': dropped.get('quota', 0), 'empty_dropped': dropped.get('empty', 0), 'finished_at': datetime.now(timezone.utc).isoformat()}
         try:
             self.db.set_state(JOB_STATE_KEY, json.dumps(state, ensure_ascii=False, separators=(',', ':')))
         except Exception as error:
@@ -277,11 +280,46 @@ class QuestionAgent:
     async def propose(self, report, scope, scope_key, model=None, source='report'):
         model = self.question_model or model
         payload = self.payload(report, scope, scope_key)
+        provider_for = getattr(self.model, 'provider_for', None)
+        try:
+            provider = await provider_for(model) if provider_for else getattr(self.model, 'provider', '')
+        except Exception as error:
+            logger.warning('question provider unavailable error=%s', type(error).__name__)
+            self._record_job(source, 0, 0, {'failed': True})
+            return []
+        context = report.get('fact_context') if isinstance(report, dict) else None
+        grounded = provider == 'ollama' and isinstance(context, dict)
+        prompt = self.prompt
+        if grounded:
+            from .llm_schema import compact_json, conservative_token_estimate
+            context = question_context({'period_start': context.get('period_start'), 'period_end': context.get('period_end'), 'event_groups': context.get('evidence')}, 600)
+            if context is None:
+                self._record_job(source, 0, 0, {'failed': True})
+                return []
+            for key in ('report_summary', 'report_supports', 'report_noteworthy', 'report_anomalies'):
+                payload.pop(key, None)
+            payload['fact_context'] = context
+            if not context['evidence']:
+                self._record_job(source, 0, 0, {})
+                return []
+            remaining = min(700, 900 - conservative_token_estimate(compact_json(context)) - 20)
+            if self.fact_query is not None and remaining >= 250 and (scope in ('daily', 'period', 'weekly')):
+                first = context['evidence'][0]
+                try:
+                    fact = await asyncio.to_thread(self.fact_query, self.db.path, {'tool': 'window_events', 'evidence_id': first['evidence_id']}, context['evidence'], datetime.fromisoformat(context['period_end']), token_budget=remaining, period_start=datetime.fromisoformat(context['period_start']), guidance_scope=scope)
+                    context['checked_fact'] = fact
+                    if conservative_token_estimate(compact_json(context)) > 900:
+                        context.pop('checked_fact')
+                except (ValueError, TypeError, OSError):
+                    logger.warning('question fact enrichment unavailable')
+            prompt += GROUNDING_PROMPT
         ask = getattr(self.model, 'analyze_questions', None) or self.model.analyze
+        deadline = asyncio.get_running_loop().time() + MODEL_CALL_WALL_SECONDS
 
         async def ask_items(prompt):
             try:
-                response = await ask(prompt, payload, model=model) if model else await ask(prompt, payload)
+                request = ask(prompt, payload, model=model) if model else ask(prompt, payload)
+                response = await asyncio.wait_for(request, timeout=max(0, deadline - asyncio.get_running_loop().time()))
                 result = response[0] if isinstance(response, tuple) else response
             except RetryableModelFormatError as error:
                 logger.warning('question proposal rejected error=%s', type(error).__name__)
@@ -290,19 +328,23 @@ class QuestionAgent:
                 logger.warning('question proposal failed error=%s', type(error).__name__)
                 return None
             try:
+                if grounded:
+                    return validate_grounded_response({'questions': result} if isinstance(result, list) else result, payload)
                 return result if isinstance(result, list) else validate_question_response(result)
             except RetryableModelFormatError as error:
                 logger.warning('question proposal rejected error=%s', type(error).__name__)
                 return None
-        items = await ask_items(self.prompt)
+        items = await ask_items(prompt)
         retried = False
-        if items == [] and self._worth_retrying(report):
+        if items == [] and (not grounded) and self._worth_retrying(report):
             logger.info('no question proposed; retrying once with a nudge source=%s', source)
             items = await ask_items(self.prompt + EMPTY_RETRY_INSTRUCTION)
             retried = True
         if not items:
-            self._record_job(source, 0, 0, {'retried': int(retried)})
+            self._record_job(source, 0, 0, {'retried': int(retried), 'failed': items is None})
             return []
+        if grounded:
+            items = program_question_reasons(items, context)
         created = self.store(items, source, scope_key, retried=retried)
         if retried:
             logger.info('question retry produced count=%s', len(created))

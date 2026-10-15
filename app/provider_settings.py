@@ -2,10 +2,14 @@ import json
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 from .remote_client import OpenAICompatibleClient
 logger = logging.getLogger(__name__)
 STATE_KEY = 'third_party_config'
 KEY_FILENAME = 'third_party.key'
+
+def _endpoint(value):
+    return str(value or '').strip().rstrip('/')
 
 class ProviderSettings:
 
@@ -13,6 +17,7 @@ class ProviderSettings:
         self.db = database
         self.data_dir = Path(data_dir)
         self.timeout_seconds = timeout_seconds
+        self.network_policy = None
 
     @property
     def key_path(self):
@@ -37,7 +42,24 @@ class ProviderSettings:
         models = [str(name).strip() for name in stored.get('models') or [] if str(name).strip()]
         return {'enabled': bool(stored.get('enabled')), 'base_url': str(stored.get('base_url') or ''), 'models': models, 'default_model': str(stored.get('default_model') or ''), 'key_present': bool(self.load_key())}
 
+    def validate(self, base_url, api_key=None):
+        address = str(base_url or '').strip()
+        if address:
+            if any((character.isspace() or character == '\\' or ord(character) < 32 or (ord(character) == 127) for character in address)):
+                raise ValueError('invalid third-party endpoint')
+            try:
+                parsed = urlsplit(address)
+                parsed.port
+            except ValueError as error:
+                raise ValueError('invalid third-party endpoint') from error
+            if parsed.scheme != 'https' or not parsed.hostname or parsed.username is not None or (parsed.password is not None) or parsed.query or parsed.fragment:
+                raise ValueError('invalid third-party endpoint')
+        if api_key is None and self.load_key():
+            if _endpoint(address) != _endpoint(self._state().get('base_url')):
+                raise ValueError('endpoint changed without a new key')
+
     def save(self, enabled, base_url, models, default_model, api_key=None):
+        self.validate(base_url, api_key)
         if api_key is not None:
             self._write_key(api_key.strip())
         names = [str(name).strip() for name in models if str(name).strip()]
@@ -62,7 +84,9 @@ class ProviderSettings:
         key = self.load_key()
         if not (config['enabled'] and config['base_url'] and key and config['models']):
             return None
-        return OpenAICompatibleClient(config['base_url'], key, config['models'], config['default_model'], self.timeout_seconds)
+        client = OpenAICompatibleClient(config['base_url'], key, config['models'], config['default_model'], self.timeout_seconds)
+        client.network_policy = self.network_policy
+        return client
 
     def automatic_model(self):
         return self.read()['default_model']

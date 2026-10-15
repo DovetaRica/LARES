@@ -17,6 +17,7 @@ class OpenAICompatibleClient:
         self.model = model or (self.installed[0] if self.installed else '')
         self.timeout_seconds = timeout_seconds
         self.transport = transport
+        self.network_policy = None
 
     @property
     def configured(self):
@@ -32,7 +33,7 @@ class OpenAICompatibleClient:
         if not self.configured:
             return False
         try:
-            async with AsyncClient(timeout=5, transport=self.transport) as client:
+            async with AsyncClient(network_policy=self.network_policy, timeout=5, transport=self.transport) as client:
                 response = await client.get(f'{self.base_url}/models', headers={'Authorization': f'Bearer {self.api_key}'})
                 return response.is_success
         except Exception:
@@ -53,7 +54,7 @@ class OpenAICompatibleClient:
 
     async def _call_model(self, prompt, serialized, chosen):
         body = {'model': chosen, 'stream': False, 'temperature': 0.2, 'max_tokens': REMOTE_OUTPUT_TOKENS, 'response_format': {'type': 'json_object'}, 'messages': [{'role': 'system', 'content': prompt}, {'role': 'user', 'content': serialized}]}
-        async with AsyncClient(timeout=min(self.timeout_seconds, MODEL_REQUEST_TIMEOUT_SECONDS), transport=self.transport) as client:
+        async with AsyncClient(network_policy=self.network_policy, timeout=min(self.timeout_seconds, MODEL_REQUEST_TIMEOUT_SECONDS), transport=self.transport) as client:
             response = await client.post(f'{self.base_url}/chat/completions', json=body, headers={'Authorization': f'Bearer {self.api_key}'})
             response.raise_for_status()
             data = response.json()

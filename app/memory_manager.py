@@ -105,7 +105,7 @@ class MemoryManager:
             semantic_keys = sorted((str(item.get('semantic_key', '')) for item in evidence))
             if any((not key for key in semantic_keys)):
                 raise ValueError('invalid evidence semantic key')
-            fingerprint = hashlib.sha256(f"evidence-v1|{pattern_type}|{'|'.join(semantic_keys)}".encode('utf-8')).hexdigest()[:24]
+            fingerprint = hashlib.sha256(f'evidence-v1|{pattern_type}|{'|'.join(semantic_keys)}'.encode('utf-8')).hexdigest()[:24]
         return {'type': pattern_type, 'description': description, 'reason': reason, 'evidence': evidence, 'sample_count': samples, 'consistency': consistency, 'counter_examples': counters, 'span_days': span_days, 'fingerprint': fingerprint}
 
     def upsert_candidates(self, candidates, findings_by_id=None, evidence_by_id=None):
@@ -155,7 +155,9 @@ class MemoryManager:
             pattern = con.execute('SELECT * FROM patterns WHERE id=?', (pattern_id,)).fetchone()
             if not pattern:
                 return False
-            con.execute('UPDATE patterns SET status=?,confidence=? WHERE id=?', (status, 1.0 if status == 'confirmed' else pattern['confidence'], pattern_id))
+            cursor = con.execute("UPDATE patterns SET status=?,confidence=? WHERE id=? AND status='candidate'", (status, 1.0 if status == 'confirmed' else pattern['confidence'], pattern_id))
+            if cursor.rowcount != 1:
+                return False
             con.execute('INSERT INTO feedback(pattern_id,action,note,created_at) VALUES(?,?,?,?)', (pattern_id, action, note, now))
             con.execute('INSERT INTO memories(pattern_id,type,content,confidence,sample_count,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)', (pattern_id, pattern['type'], pattern['description'], 1.0 if status == 'confirmed' else pattern['confidence'], pattern['sample_count'], status, now, now))
         return True
@@ -209,7 +211,7 @@ class MemoryManager:
             for room, item in sorted(eligible.items(), key=lambda pair: -pair[1]['seconds']):
                 if room in rejected:
                     continue
-                content = f"程序观察（未经房主确认）：「{room}」在 {chinese_label(start.isoformat())} 至 {chinese_label(end.isoformat())} 的北京日中，有 {item['days']} 天占用不少于 {min_minutes_per_day} 分钟；可信区间合计 {round(item['seconds'] / 3600, 1)} 小时。已截窗并合并同房间重叠，不推断人员身份或因果。"
+                content = f'程序观察（未经房主确认）：「{room}」在 {chinese_label(start.isoformat())} 至 {chinese_label(end.isoformat())} 的北京日中，有 {item['days']} 天占用不少于 {min_minutes_per_day} 分钟；可信区间合计 {round(item['seconds'] / 3600, 1)} 小时。已截窗并合并同房间重叠，不推断人员身份或因果。'
                 confidence = min(0.95, 0.55 + 0.05 * item['days'])
                 old = by_room.get(room, [])
                 if old:

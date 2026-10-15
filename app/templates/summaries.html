@@ -41,6 +41,7 @@
     </p>
     {% if selected.reference_model %}<p class="muted">本报告在生成时参考了 {{ selected.reference_model }}{% if selected.reference_period %} 于 {{ selected.reference_period|moment }}{% endif %} 的报告作为范例（范例只影响结构与篇幅，本时段的事实仍来自本次输入）。</p>{% endif %}
     {% if selected.legacy_shape %}<p class="notice">该记录以旧版模型原始结构保存，这里只按只读兼容方式展示其中的文本，数据库内容未被改写。</p>{% endif %}
+    {% if selected.review_status == 'unresolved' %}<p class="notice">本次模型复核发现了问题，但尚未完成修订；请结合原始统计阅读。</p>{% elif selected.review_status in ('unavailable', 'skipped') %}<p class="muted">本次补充复核未完成，当前显示已通过格式与设备身份校验的初稿。</p>{% endif %}
     {{ render_value(selected.display_body, report_labels) }}
     {% if selected.display_metadata %}
     <details class="technical-metadata">

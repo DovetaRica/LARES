@@ -31,6 +31,7 @@ def main():
             work=Path(folder)/str(idx); work.mkdir()
             venv.EnvBuilder(with_pip=True).create(work/'venv')
             python=work/'venv'/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+            run([str(python),'-m','pip','install','--disable-pip-version-check','pip==26.2.1'],work,env)
             if artifact.name.endswith('.tar.gz'):
                 run([str(python),'-m','pip','install','--disable-pip-version-check','-r',str(root/'requirements-build.txt')],work,env)
             run([str(python),'-m','pip','install','--disable-pip-version-check','--no-deps','--no-build-isolation',str(artifact.resolve())],work,env)

@@ -8,13 +8,13 @@ Automation handles the routine. LARES helps investigate the unknown.
 
 An observation-first exception intelligence layer for Home Assistant. Keep existing automation independent, inspect ambiguous events, and turn repeated manual corrections into review candidates.
 
-**Status: v0.2.1 — observation-only local application.**
+**Status: v0.3.0 — observation-only local application.**
 
 [中文](README.zh-CN.md) · [Architecture](docs/architecture.md) · [Deployment](docs/deployment.md) · [Privacy](docs/privacy.md) · [Agent install](docs/ai-install.md) · [Contributor guide](AGENTS.md)
 
 ## New optional application preview
 
-Version 0.2 adds the extracted local dashboard, layered memory/report orchestration and streaming statistics. Install with `python -m pip install ".[app]"`, run `python -m app.demo`, then `lares-app --demo` for a temporary synthetic UI. See [application setup and limits](docs/application.md) and [extraction notes](docs/extraction-v02.md). The 0.2.1 patch adds report coverage/budget repairs, model-call statistics, persistent direction confirmation and the Rhine theme. See [release compatibility and limits](docs/release-v021.md).
+Version 0.2 adds the extracted local dashboard, layered memory/report orchestration and streaming statistics. Install with `python -m pip install ".[app]"`, run `python -m app.demo`, then `lares-app --demo` for a temporary synthetic UI. See [application setup and limits](docs/application.md) and [extraction notes](docs/extraction-v02.md). Version 0.3 adds opt-in report review and bounded fact queries, idle lead discovery, durable manual jobs and content-free request stages. See [release compatibility and limits](docs/release-v030.md).
 
 ## Try without a home, token, model, or network
 
@@ -52,7 +52,7 @@ Follow [deployment](docs/deployment.md) for isolated installation and configurat
 
 ## Roadmap, not current claims
 
-The optional app includes layered summaries, persisted learning and reconnect/report orchestration code. Live integration validation, migration, HA Add-on/HACS packaging and hardware benchmarks remain future work. Current context handling truncates old events; it does not prove that all important evidence survives.
+The optional app includes layered summaries, persisted learning and reconnect/report orchestration code. Live integration validation, production recovery drills, HA Add-on/HACS packaging and hardware benchmarks remain future work. Current context handling truncates old events; it does not prove that all important evidence survives.
 
 Intel Arc A310 is a planned validation target. No GPU support, speed, power, minimum hardware, or percentage of avoided inference is claimed as measured here.
 
@@ -62,7 +62,7 @@ Intel Arc A310 is a planned validation target. No GPU support, speed, power, min
 docker compose run --rm demo
 ```
 
-The provided demo service has no network, host ports or host volumes. Its read-only root has a 64 MiB temporary filesystem for replay SQLite data. Building downloads dependencies. The alpha.3 CLI container passed GitHub CI. This extraction has not rerun Docker locally; the optional app is not part of this container recipe.
+The provided demo service has no network, host ports or host volumes. Its read-only root has a 64 MiB temporary filesystem for replay SQLite data. Building downloads dependencies. The v0.2.1 CLI container passed GitHub CI. Container checks are rerun in release CI; the optional app is not part of this container recipe.
 
 ## Install from a release
 

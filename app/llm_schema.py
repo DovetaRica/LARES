@@ -134,6 +134,15 @@ def conservative_token_estimate(text):
     ascii_chars = sum((ord(ch) < 128 for ch in text))
     return len(text) - ascii_chars + math.ceil(ascii_chars / 2)
 
+def ollama_input_budget(context_tokens, output_tokens, prompt, *, prompt_reserve_tokens=0, retry_instruction=''):
+    reserve = max(prompt_reserve_tokens, conservative_token_estimate(prompt + retry_instruction) + 128)
+    return context_tokens - output_tokens - reserve
+
+def ollama_request_plan(prompt, serialized_payload, context_tokens, output_tokens):
+    estimate = conservative_token_estimate(serialized_payload)
+    budget = ollama_input_budget(context_tokens, output_tokens, prompt)
+    return {'context_tokens': context_tokens, 'output_limit': output_tokens, 'prompt_tokens_estimate': conservative_token_estimate(prompt), 'input_tokens_estimate': estimate, 'input_token_budget': budget, 'budget_exceeded': estimate > budget}
+
 def _validate_generic(value, depth=0):
     if depth > 3:
         raise ValueError('response nesting too deep')
@@ -277,7 +286,7 @@ def normalize_identity_claims(result, payload):
         normalized = {key: rewrite(item) for key, item in value.items()}
         finding = findings.get(str(normalized.get('finding_id') or ''))
         if finding is not None and isinstance(normalized.get('description'), str):
-            description = f"{finding.get('actor_label')}与{finding.get('sensor_label')}在历史数据中呈统计共现（相关非因果，仅供观察）。"
+            description = f'{finding.get('actor_label')}与{finding.get('sensor_label')}在历史数据中呈统计共现（相关非因果，仅供观察）。'
             if normalized['description'] != description:
                 normalized['description'] = description
                 changed += 1

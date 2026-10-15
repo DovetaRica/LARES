@@ -21,7 +21,7 @@ class HAClient:
         self.vacuum_segments = {}
 
     async def _connect(self):
-        check_endpoint(self.ws_url.replace('wss://', 'https://').replace('ws://', 'http://'))
+        check_endpoint(self.ws_url.replace('wss://', 'https://').replace('ws://', 'http://'), getattr(self, 'network_policy', None))
         connection = websockets.connect(self.ws_url, open_timeout=15, ping_interval=30,
                                         max_size=1048576, max_queue=16, proxy=None)
         connection.process_redirect = lambda error: error

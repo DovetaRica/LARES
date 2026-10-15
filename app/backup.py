@@ -1,19 +1,21 @@
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 logger = logging.getLogger(__name__)
 BACKUP_NAME = 'home_ai-*.db'
 BACKUP_KEEP_MIN = 30
 BACKUP_KEEP_DAYS = 7
+BACKUP_STAMP_FORMAT = '%Y%m%dT%H%M%SZ'
 
 def backup_timestamp(path):
     name = path.name
     stem = name[len('home_ai-'):-len('.db')] if name.startswith('home_ai-') and name.endswith('.db') else ''
-    for pattern in ('%Y%m%dT%H%M%SZ', '%Y-%m-%d'):
+    for pattern in (BACKUP_STAMP_FORMAT, '%Y-%m-%d'):
         try:
-            return datetime.strptime(stem, pattern).replace(tzinfo=timezone.utc)
+            stamp = datetime.strptime(stem, pattern).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
+        return stamp.replace(hour=23, minute=59, second=59) if pattern == '%Y-%m-%d' else stamp
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
 
 def prune_backups(root, keep_min=BACKUP_KEEP_MIN, keep_days=BACKUP_KEEP_DAYS, now=None):
@@ -41,7 +43,7 @@ def _remove_orphan_sidecars(root, removed):
 
 def create_backup(database, backup_dir, weekly=False):
     root = Path(backup_dir) / ('weekly' if weekly else 'daily')
-    stamp = date.today().isoformat()
+    stamp = datetime.now(timezone.utc).strftime(BACKUP_STAMP_FORMAT)
     destination = root / f'home_ai-{stamp}.db'
     database.backup(destination)
     removed = prune_backups(root)

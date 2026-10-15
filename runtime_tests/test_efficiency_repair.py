@@ -283,8 +283,8 @@ def test_daily_combined_context_shares_budget_without_losing_slots_or_rules(tmp_
     assert model['report_coverage'] == original['report_coverage']
     assert model['user_guidance'][:2] == rules
     assert len(model['user_guidance']) < 10
-    assert model['guidance_selection']['selected'] == len(model['user_guidance'])
-    assert payload['guidance_selection'] == model['guidance_selection']
+    assert payload['guidance_selection']['selected'] == len(model['user_guidance'])
+    assert 'guidance_selection' not in model
     assert model['long_term_memories'][0]['status'] == 'confirmed'
     for slot in model['window_facts']['slots']:
         assert slot['device_actions'] == 5

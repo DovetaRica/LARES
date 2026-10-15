@@ -1,13 +1,12 @@
-import asyncio
 import json
 import logging
 import re
 import secrets
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -16,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 from .behavior_analyzer import PERIOD_NON_TERMINAL
 from .question_agent import ANSWER_SCOPE_LABELS
+from .task_queue import RegenerationRegistry, run_regeneration_worker
 from . import condense
 from . import time_display
 logger = logging.getLogger(__name__)
@@ -79,55 +79,7 @@ class MaintainerScoreBody(BaseModel):
     note: str = Field(default='', max_length=200)
 RECENT_ANSWERS = 8
 REGENERATION_SOURCES = {'period': ('period_summaries', 'period_start'), 'daily': ('daily_summaries', 'day'), 'weekly': ('weekly_summaries', 'week_start')}
-
-class RegenerationRegistry:
-
-    def __init__(self):
-        self.queue = asyncio.Queue()
-        self.jobs = []
-        self.running = None
-
-    @property
-    def in_flight(self):
-        return {(job['scope'], job['key']) for job in self.jobs}
-
-    def add(self, scope, key, value, model=None):
-        if any((job['scope'] == scope and job['key'] == key for job in self.jobs)):
-            return False
-        job = {'scope': scope, 'key': key, 'value': value, 'model': model, 'queued_at': datetime.now(timezone.utc).isoformat()}
-        self.jobs.append(job)
-        self.queue.put_nowait(job)
-        return True
-
-    def snapshot(self):
-        return {'running': dict(self.running) if self.running else None, 'waiting': [dict(job) for job in self.jobs if job is not self.running]}
 REGENERATION_REGISTRY = RegenerationRegistry()
-
-async def run_regeneration_worker(analyzer, registry):
-    while True:
-        job = await registry.queue.get()
-        registry.running = job
-        try:
-            value, model = (job['value'], job['model'])
-            if job['scope'] == 'period':
-                await analyzer.period(end=datetime.fromisoformat(str(value)), source='manual', model=model)
-            elif job['scope'] == 'daily':
-                await analyzer.daily(day=date.fromisoformat(str(value)[:10]), model=model)
-            elif job['scope'] == 'questions':
-                await analyzer.ask_questions('period', model=model)
-            elif job['scope'] == 'distill':
-                report_scope, _, report_key = str(job['value']).partition(':')
-                await analyzer.distill(report_scope or 'period', report_key)
-            else:
-                await analyzer.weekly(week_start=date.fromisoformat(str(value)[:10]), model=model)
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            logger.error('manual report regeneration failed error=%s', type(error).__name__)
-        finally:
-            registry.running = None
-            registry.jobs = [item for item in registry.jobs if item is not job]
-            registry.queue.task_done()
 
 class AdvisorSubmissionBody(GuidanceBody):
     external_id: str = Field(min_length=3, max_length=100, pattern='^[A-Za-z0-9][A-Za-z0-9._:-]*$')
@@ -168,13 +120,13 @@ def _scored_values(target_scores):
     return values
 REPORT_STATUS_LABELS = {'succeeded': ('confirmed', '模型报告已生成'), 'model_output_rejected': ('rejected', '模型输出未通过校验，已落确定性降级报告'), 'generating': ('candidate', '正在生成中，请稍后刷新'), 'interrupted': ('candidate', '生成被中断，下次启动会自动重试'), 'failed': ('rejected', '生成失败'), 'auto_retry_exhausted': ('candidate', '已达自动重试上限，可在页面手动重新总结')}
 ISO_OFFSET_RE = re.compile('^(\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?) (\\d{2}:?\\d{2})$')
-REPORT_DIAGNOSTIC_FIELDS = frozenset({'cooccurrence_meta', 'cooccurrence_findings_full'})
+REPORT_DIAGNOSTIC_FIELDS = frozenset({'cooccurrence_meta', 'cooccurrence_findings_full', 'model_review'})
 
 def report_body(summary):
     if not isinstance(summary, dict):
         return summary
     return {key: value for key, value in summary.items() if key not in REPORT_DIAGNOSTIC_FIELDS and value not in (None, '', [], {})}
-REPORT_VALUE_LABELS = {'severity': {'high': '高', 'medium': '中', 'low': '低'}, 'type': {'repeated_automation_correction': '自动化被反复纠正', 'sensor_stale': '传感器长时间没有新数据', 'anomaly_detection': '规律性异常', 'user_guidance_action_required': '需要你按偏好判断', 'deterministic_anomaly': '确定性异常（由程序规则发现）', 'cooccurrence': '共现规律'}, 'kind': {'cooccurrence': '共现分析'}, 'classification': {'suspected_robot_interference': '疑似机器人干扰', 'suspected_device_interference': '疑似运动设备干扰', 'undetermined': '无法判断'}, 'status': {'reported': '已达到报告条件', 'needs_observation': '仍需继续观察', 'insufficient_evidence': '证据不足', 'open': '进行中', 'closed': '已结束'}, 'source': {'system': '系统', 'manual': '手动', 'automation': '自动化'}, 'event_type': {'state_changed': '状态发生变化'}}
+REPORT_VALUE_LABELS = {'severity': {'high': '高', 'medium': '中', 'low': '低'}, 'type': {'repeated_automation_correction': '自动化被反复纠正', 'sensor_stale': '传感器长时间没有新数据', 'anomaly_detection': '规律性异常', 'user_guidance_action_required': '需要你按偏好判断', 'deterministic_anomaly': '确定性异常（由程序规则发现）', 'cooccurrence': '共现规律'}, 'kind': {'cooccurrence': '共现分析'}, 'classification': {'suspected_robot_interference': '疑似机器人干扰', 'suspected_device_interference': '疑似运动设备干扰', 'undetermined': '无法判断'}, 'status': {'passed': '复核未发现问题', 'revised': '已根据复核修订', 'skipped': '证据超出复核预算', 'unavailable': '本次复核未完成', 'unresolved': '复核发现问题，尚未完成修订', 'reported': '已达到报告条件', 'needs_observation': '仍需继续观察', 'insufficient_evidence': '证据不足', 'open': '进行中', 'closed': '已结束'}, 'source': {'system': '系统', 'manual': '手动', 'automation': '自动化'}, 'reason': {'review_input_budget': '完整草稿与证据超出复核预算', 'time_budget': '本次任务剩余时间不足', 'repair_output_budget': '完整修订输入与所需输出无法同时装下', 'repair_output_limit': '修订输出达到上限，保留原草稿', 'critic_failed': '复核请求或回复校验未完成', 'repair_failed': '修订请求或回复校验未完成'}, 'event_type': {'state_changed': '状态发生变化'}}
 ENTITY_ID_KEYS = frozenset({'entity_id', 'entity_ids'})
 ENTITY_ID_LIKE_RE = re.compile('[a-z][a-z0-9_]*\\.[a-z0-9_]+', re.IGNORECASE)
 
@@ -251,7 +203,7 @@ def readable_report(value, db=None, profile=None, key=None, metadata=False):
         translated = REPORT_VALUE_LABELS.get(key or '', {}).get(value)
         return translated if translated is not None else readable_text(value, db, profile)
     return value
-REPORT_FIELD_LABELS = {'summary': '正文摘要', 'supports': '支撑观察', 'new_candidates': '候选规律', 'anomalies': '异常', 'automation_corrections': '自动化纠正', 'noteworthy': '值得注意', 'error_type': '错误类型', 'cooccurrence_findings': '共现发现', 'cooccurrence_findings_full': '共现发现（完整记录）', 'cooccurrence_meta': '共现分析元数据', 'reference_model': '参考的范例模型', 'distilled_from': '蒸馏来源模型（学习其分析，事实仍来自本次输入）', 'reference_period': '范例来源时段', 'date': '日期', 'week_start': '周起始日', 'learning_only': '仍在学习模式', 'automation_suggestions': '自动化建议', 'period_summaries': '各时段小结', 'daily_summaries': '各日总结', 'major_sessions': '主要在场时段', 'patterns': '规律', 'existing_patterns': '已有规律', 'user_guidance': '房主提供的分析偏好', 'reviewed_pattern_feedback': '已确认或否定的规律', 'robot_presence_annotations': '运动设备与人体信号复核', 'annotation_id': '复核编号', 'classification': '当前判断', 'observed_at': '信号时间', 'actor': '相关设备', 'sensor': '人体传感器', 'actor_state': '设备状态', 'spatial_evidence': '空间证据', 'human_evidence': '人员证据', 'basis': '判断依据', 'limitation': '判断限制', 'review_prompt': '请你复核', 'type': '类型', 'entity_id': '实体', 'description': '描述', 'reason': '依据', 'evidence_ids': '证据编号', 'finding_id': '共现结论编号', 'actor_device': '相关设备名称', 'actor_area': '相关设备区域', 'actor_label': '相关设备中文名', 'sensor_device': '传感器名称', 'sensor_area': '传感器区域', 'sensor_label': '传感器中文名', 'sample_count': '样本数', 'first_seen': '首次出现', 'last_seen': '最近出现', 'severity': '严重度', 'room': '房间', 'area': '区域', 'device': '设备', 'appliance_type': '设备类型', 'status': '状态', 'kind': '分析类别', 'event_type': '事件类型', 'source': '来源', 'count': '出现次数', 'old_state': '变化前状态', 'new_state': '变化后状态', 'episodes_valid': '有效清扫时段数', 'episodes_total': '清扫时段总数', 'episodes_with_edge': '出现人体活动的清扫时段数', 'edge_local_days': '出现人体活动的天数', 'episode_local_days': '发生清扫的天数', 'counter_examples': '未同时出现的次数', 'consistency': '同时出现比例', 'algorithm_version': '算法版本', 'config_hash': '配置版本', 'payload_collections': '输入内容裁剪统计', 'before': '裁剪前', 'after': '裁剪后'}
+REPORT_FIELD_LABELS = {'model_review': '模型复核', 'issues_found': '发现问题数', 'repair_output_limit': '修订输出上限（token）', 'summary': '正文摘要', 'supports': '支撑观察', 'new_candidates': '候选规律', 'anomalies': '异常', 'automation_corrections': '自动化纠正', 'noteworthy': '值得注意', 'error_type': '错误类型', 'cooccurrence_findings': '共现发现', 'cooccurrence_findings_full': '共现发现（完整记录）', 'cooccurrence_meta': '共现分析元数据', 'reference_model': '参考的范例模型', 'distilled_from': '蒸馏来源模型（学习其分析，事实仍来自本次输入）', 'reference_period': '范例来源时段', 'date': '日期', 'week_start': '周起始日', 'learning_only': '仍在学习模式', 'automation_suggestions': '自动化建议', 'period_summaries': '各时段小结', 'daily_summaries': '各日总结', 'major_sessions': '主要在场时段', 'patterns': '规律', 'existing_patterns': '已有规律', 'user_guidance': '房主提供的分析偏好', 'reviewed_pattern_feedback': '已确认或否定的规律', 'robot_presence_annotations': '运动设备与人体信号复核', 'annotation_id': '复核编号', 'classification': '当前判断', 'observed_at': '信号时间', 'actor': '相关设备', 'sensor': '人体传感器', 'actor_state': '设备状态', 'spatial_evidence': '空间证据', 'human_evidence': '人员证据', 'basis': '判断依据', 'limitation': '判断限制', 'review_prompt': '请你复核', 'type': '类型', 'entity_id': '实体', 'description': '描述', 'reason': '依据', 'evidence_ids': '证据编号', 'finding_id': '共现结论编号', 'actor_device': '相关设备名称', 'actor_area': '相关设备区域', 'actor_label': '相关设备中文名', 'sensor_device': '传感器名称', 'sensor_area': '传感器区域', 'sensor_label': '传感器中文名', 'sample_count': '样本数', 'first_seen': '首次出现', 'last_seen': '最近出现', 'severity': '严重度', 'room': '房间', 'area': '区域', 'device': '设备', 'appliance_type': '设备类型', 'status': '状态', 'kind': '分析类别', 'event_type': '事件类型', 'source': '来源', 'count': '出现次数', 'old_state': '变化前状态', 'new_state': '变化后状态', 'episodes_valid': '有效清扫时段数', 'episodes_total': '清扫时段总数', 'episodes_with_edge': '出现人体活动的清扫时段数', 'edge_local_days': '出现人体活动的天数', 'episode_local_days': '发生清扫的天数', 'counter_examples': '未同时出现的次数', 'consistency': '同时出现比例', 'algorithm_version': '算法版本', 'config_hash': '配置版本', 'payload_collections': '输入内容裁剪统计', 'before': '裁剪前', 'after': '裁剪后'}
 
 def _restore_offset(value):
     if not value or '+' in value:
@@ -311,6 +263,17 @@ def _relative(value):
         return f'{seconds // 86400} 天前'
     except (TypeError, ValueError):
         return str(value)
+
+def _trusted_settings_origin(origin, host_header):
+    try:
+        parsed = urlsplit(origin)
+        parsed.port
+        host = parsed.hostname or ''
+        request = urlsplit(f'//{host_header}')
+        request.port
+    except ValueError:
+        return False
+    return bool(host) and parsed.scheme in ('http', 'https') and (not (parsed.username or parsed.password or parsed.query or parsed.fragment)) and (parsed.path in ('', '/')) and (parsed.netloc.lower() == host_header.lower())
 
 def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurrence=None, analyzer=None, registry=None, provider_settings=None, questions=None):
     router = APIRouter()
@@ -394,6 +357,8 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
         if not isinstance(summary, dict):
             return
         detail['generation_status'] = summary.pop('generation_status', None)
+        review = summary.get('model_review')
+        detail['review_status'] = review.get('status') if isinstance(review, dict) else None
         detail['analysis_scope'] = summary.pop('analysis_scope', None)
         detail['error_type'] = summary.pop('error_type', None)
         coverage = summary.pop('report_coverage', {})
@@ -492,7 +457,7 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
                 else:
                     clauses.append(f'{column} {operator} ?')
                     params.append(f'%{value}%' if operator == 'LIKE' else value)
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ''
+        where = f'WHERE {' AND '.join(clauses)}' if clauses else ''
         page_size = min(max(limit, 1), 200)
         params.extend([page_size, max(offset, 0)])
         rows = db.rows(f'SELECT id,ts,domain,entity_id,category,event_type,source,old_state,new_state,area,attributes_json,metadata_json FROM events {where} ORDER BY id DESC LIMIT ? OFFSET ?', params)
@@ -721,7 +686,7 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
             stored_cooccurrence['lookback_end_label'] = chinese_label(stored_cooccurrence.get('lookback_end'))
         remote = getattr(ollama, 'remote', None)
         third_party_status = {'enabled': remote is not None, 'models': third_party_models(), 'default_model': settings.third_party_default_model or None}
-        return {'home_assistant': {'connected': ha.connected, 'last_event': last_event, 'last_event_label': chinese_label(last_event), 'last_event_relative': _relative(states.get('last_ha_event'))}, 'ollama': {'connected': ollama_ok, 'model': ollama.model}, 'third_party': third_party_status, 'model_calls_7d': db.rows("SELECT scope,COUNT(*) AS calls,SUM(attempts) AS attempts,SUM(rejections) AS rejections,SUM(queue_ms) AS queue_ms,SUM(call_ms) AS call_ms,SUM(CASE WHEN outcome='succeeded' THEN 1 ELSE 0 END) AS succeeded FROM model_calls WHERE started_at>=? GROUP BY scope", ((datetime.now(timezone.utc) - timedelta(days=7)).isoformat(),)), 'database': {'ok': database_ok, 'path': str(db.path), 'size_bytes': db.path.stat().st_size if db.path.exists() else 0}, 'maintainers': maintainer_board(), 'analyzer': {'last_period': last_period, 'last_period_label': chinese_label(last_period), 'last_period_status': last_period_status, 'last_daily': last_daily, 'last_daily_label': chinese_label(last_daily), 'last_weekly': last_weekly, 'last_weekly_label': chinese_label(last_weekly), 'learning_only': settings.learning_only, 'learning_days': learning_days, 'min_pattern_samples': min_pattern_samples, 'learning_mature': learning_mature, 'learning_ready_at': learning_ready_at, 'learning_ready_label': chinese_label(learning_ready_at), 'prompt_sha256': states.get('system_prompt_sha256'), 'period_job': period_job, 'pending_periods': pending_periods, 'regeneration': regeneration_queue(), 'distill_job': _json(states.get('distill_job_status'), {}), 'question_job': _json(states.get('question_job_status'), {})}, 'counts': {'events': events, 'total_events': db.scalar('SELECT COUNT(*) FROM events'), 'sessions': db.scalar('SELECT COUNT(*) FROM sessions'), 'candidate_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='candidate'"), 'confirmed_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='confirmed'"), 'rejected_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='rejected'"), 'memories': db.scalar("SELECT COUNT(*) FROM memories WHERE status='confirmed'"), 'suggestions': db.scalar('SELECT COUNT(*) FROM automation_suggestions')}, 'collector': {'collection_started_at': collection_started, 'collection_started_label': chinese_label(collection_started), 'monitored_domains': sorted(event_filter.domains), 'monitored_entity_count': int(states.get('monitored_entity_count', 0)), 'explicit_entity_count': configured_collect_count, 'entity_profile_enabled': profile is not None, 'entity_profile_id': profile.profile_id if profile else None, 'entity_profile_entry_count': len(profile.entities) if profile else 0, 'entity_coverage': _json(states.get('entity_coverage'), {})}, 'cooccurrence': stored_cooccurrence, 'segments': analyzer.segment_memory.buffer_state() if analyzer is not None and analyzer.segment_memory else None}
+        return {'home_assistant': {'connected': ha.connected, 'last_event': last_event, 'last_event_label': chinese_label(last_event), 'last_event_relative': _relative(states.get('last_ha_event'))}, 'ollama': {'connected': ollama_ok, 'model': ollama.model}, 'third_party': third_party_status, 'proactive': {'enabled': getattr(settings, 'proactive_enabled', True), 'max_calls_per_day': getattr(settings, 'proactive_max_calls_per_day', 6), **{key: value for key, value in _json(states.get('proactive_scout_status'), {}).items() if key in ('status', 'day', 'attempts_today', 'last_attempt', 'last_completed', 'model', 'findings', 'findings_added', 'error_type')}}, 'model_calls_7d': db.rows("SELECT scope,COUNT(*) AS calls,SUM(attempts) AS attempts,SUM(rejections) AS rejections,SUM(queue_ms) AS queue_ms,SUM(call_ms) AS call_ms,SUM(CASE WHEN outcome='succeeded' THEN 1 ELSE 0 END) AS succeeded FROM model_calls WHERE started_at>=? GROUP BY scope", ((datetime.now(timezone.utc) - timedelta(days=7)).isoformat(),)), 'database': {'ok': database_ok, 'path': str(db.path), 'size_bytes': db.path.stat().st_size if db.path.exists() else 0}, 'maintainers': maintainer_board(), 'analyzer': {'last_period': last_period, 'last_period_label': chinese_label(last_period), 'last_period_status': last_period_status, 'last_daily': last_daily, 'last_daily_label': chinese_label(last_daily), 'last_weekly': last_weekly, 'last_weekly_label': chinese_label(last_weekly), 'learning_only': settings.learning_only, 'learning_days': learning_days, 'min_pattern_samples': min_pattern_samples, 'learning_mature': learning_mature, 'learning_ready_at': learning_ready_at, 'learning_ready_label': chinese_label(learning_ready_at), 'prompt_sha256': states.get('system_prompt_sha256'), 'period_job': period_job, 'pending_periods': pending_periods, 'regeneration': regeneration_queue(), 'distill_job': _json(states.get('distill_job_status'), {}), 'question_job': _json(states.get('question_job_status'), {})}, 'counts': {'events': events, 'total_events': db.scalar('SELECT COUNT(*) FROM events'), 'sessions': db.scalar('SELECT COUNT(*) FROM sessions'), 'candidate_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='candidate'"), 'confirmed_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='confirmed'"), 'rejected_patterns': db.scalar("SELECT COUNT(*) FROM patterns WHERE status='rejected'"), 'memories': db.scalar("SELECT COUNT(*) FROM memories WHERE status='confirmed'"), 'suggestions': db.scalar('SELECT COUNT(*) FROM automation_suggestions')}, 'collector': {'collection_started_at': collection_started, 'collection_started_label': chinese_label(collection_started), 'monitored_domains': sorted(event_filter.domains), 'monitored_entity_count': int(states.get('monitored_entity_count', 0)), 'explicit_entity_count': configured_collect_count, 'entity_profile_enabled': profile is not None, 'entity_profile_id': profile.profile_id if profile else None, 'entity_profile_entry_count': len(profile.entities) if profile else 0, 'entity_coverage': _json(states.get('entity_coverage'), {})}, 'cooccurrence': stored_cooccurrence, 'segments': analyzer.segment_memory.buffer_state() if analyzer is not None and analyzer.segment_memory else None}
 
     def apply_feedback(pattern_id, action, note=None):
         if action not in {'confirm', 'reject'}:
@@ -732,6 +697,8 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
         if current[0]['status'] != 'candidate':
             raise HTTPException(409, 'only candidate patterns can receive feedback')
         if not memory.feedback(pattern_id, action, note):
+            if db.rows('SELECT id FROM patterns WHERE id=?', (pattern_id,)):
+                raise HTTPException(409, 'only candidate patterns can receive feedback')
             raise HTTPException(404, 'pattern not found')
         return {'ok': True, 'pattern_id': pattern_id, 'status': 'confirmed' if action == 'confirm' else 'rejected'}
 
@@ -972,14 +939,14 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
         elif job['scope'] == 'questions':
             label = '让 AI 提问'
         elif job['scope'] == 'segment':
-            label = f"分层记忆段 · {job.get('label') or job['key']}"
+            label = f'分层记忆段 · {job.get('label') or job['key']}'
         elif job['scope'] == 'daily':
-            label = f"日报 · {chinese_label(job['value'])}"
+            label = f'日报 · {chinese_label(job['value'])}'
         elif job['scope'] == 'weekly':
-            label = f"周报 · {chinese_label(job['value'])}"
+            label = f'周报 · {chinese_label(job['value'])}'
         else:
             label = chinese_label(job['value']) or str(job.get('label') or job['key'])
-        return {'scope': job['scope'], 'key': job['key'], 'model': job.get('model') or getattr(ollama, 'model', None), 'label': label or job['key'], 'queued_label': chinese_label(job.get('queued_at')), 'source': job.get('source')}
+        return {'scope': job['scope'], 'key': job['key'], 'model': job.get('model') or getattr(ollama, 'model', None), 'label': label or job['key'], 'queued_label': chinese_label(job.get('queued_at')), 'source': job.get('source'), 'status': job.get('status'), 'finished_label': chinese_label(job.get('finished_at')), 'error_type': job.get('error_type')}
 
     def _live_system_job(state, scope, label_prefix=''):
         if not isinstance(state, dict) or state.get('status') != 'generating':
@@ -992,19 +959,21 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
                 end = datetime.fromisoformat(str(state.get('period_end') or start + timedelta(hours=6)))
                 label = f'{period_label(start, end)} · 定时' if state.get('source') != 'manual' else period_label(start, end)
             except (TypeError, ValueError):
-                label = f"六小时总结 · {chinese_label(state.get('period_start'))}"
+                label = f'六小时总结 · {chinese_label(state.get('period_start'))}'
         elif scope == 'daily':
-            label = f"日报 · {chinese_label(state.get('day') or state.get('period_start'))}"
+            label = f'日报 · {chinese_label(state.get('day') or state.get('period_start'))}'
         elif scope == 'weekly':
-            label = f"周报 · {chinese_label(state.get('week_start') or state.get('period_start'))}"
+            label = f'周报 · {chinese_label(state.get('week_start') or state.get('period_start'))}'
         elif scope == 'distill':
-            label = f"蒸馏 · {chinese_label(state.get('report_key') or state.get('period_start'))}"
+            label = f'蒸馏 · {chinese_label(state.get('report_key') or state.get('period_start'))}'
             if state.get('teacher_model'):
-                label += f"（学 {state.get('teacher_model')}）"
+                label += f'（学 {state.get('teacher_model')}）'
         elif scope == 'questions':
             label = 'AI 提问'
         elif scope == 'segment':
-            label = state.get('label') or f"分层记忆段 #{state.get('segment_id')}"
+            label = state.get('label') or f'分层记忆段 #{state.get('segment_id')}'
+        elif scope == 'proactive':
+            label = '白天空闲 · 待核实线索发现'
         return {'scope': scope, 'key': str(key), 'model': state.get('local_model') or state.get('model'), 'label': label, 'queued_label': chinese_label(state.get('started_at')), 'source': state.get('source') or 'scheduled'}
 
     def regeneration_queue():
@@ -1013,7 +982,7 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
         waiting = [describe_job(job) for job in snapshot['waiting']]
         states = {r['key']: r['value'] for r in db.rows('SELECT key,value FROM system_state')}
         live = []
-        for key, scope in (('period_job_status', 'period'), ('daily_job_status', 'daily'), ('weekly_job_status', 'weekly'), ('distill_job_status', 'distill'), ('question_job_status', 'questions'), ('segment_job_status', 'segment')):
+        for key, scope in (('period_job_status', 'period'), ('daily_job_status', 'daily'), ('weekly_job_status', 'weekly'), ('distill_job_status', 'distill'), ('question_job_status', 'questions'), ('segment_job_status', 'segment'), ('proactive_scout_status', 'proactive')):
             item = _live_system_job(_json(states.get(key), {}), scope)
             if item and (not (manual_running and item['scope'] == manual_running['scope'] and (str(item['key']) == str(manual_running.get('key'))))):
                 live.append(item)
@@ -1035,7 +1004,7 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
                 waiting.append({'scope': 'segment', 'key': f'pending-{pending}', 'model': None, 'label': f'分层记忆段 ×{pending} 待 AI 摘要', 'queued_label': None, 'source': 'segment'})
         rank = {'period': 0, 'daily': 0, 'weekly': 0, 'questions': 1, 'distill': 1, 'segment': 2}
         live.sort(key=lambda it: (rank.get(it.get('scope'), 3), it.get('queued_label') or ''))
-        return {'running': live[0] if live else None, 'running_all': live, 'waiting': waiting}
+        return {'running': live[0] if live else None, 'running_all': live, 'waiting': waiting, 'error': snapshot.get('error'), 'recent': [describe_job(job) for job in snapshot.get('recent', [])]}
 
     def provider_status():
         return provider_settings.read() if provider_settings is not None else None
@@ -1058,6 +1027,9 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
     async def save_settings(request: Request):
         if provider_settings is None:
             raise HTTPException(503, '设置存储不可用')
+        supplied_origin = request.headers.get('origin')
+        if supplied_origin and (not _trusted_settings_origin(supplied_origin, request.headers.get('host') or '')):
+            raise HTTPException(403, '来源校验失败，已拒绝本次设置提交')
         fields = await form_fields(request)
         enabled = fields.get('enabled', 'false')
         base_url = fields.get('base_url', '')
@@ -1065,13 +1037,21 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
         models = fields.get('models', '')
         default_model = fields.get('default_model', '')
         clear_key = fields.get('clear_key', '')
+        key_update = '' if clear_key else api_key.strip() or None
+        try:
+            provider_settings.validate(base_url, key_update)
+        except ValueError as error:
+            logger.warning('provider settings rejected error=%s', type(error).__name__)
+            raise HTTPException(400, '接口地址或密钥无效，请检查后重试') from error
         automatic = fields.get('automatic_model', '') or fields.get('default_model', '')
         automatic_reset = bool(automatic) and automatic not in await available_models()
         if automatic_reset:
             automatic = ''
-        key_update = '' if clear_key else api_key.strip() or None
         try:
             provider_settings.save(enabled == 'true', base_url, models.split(','), automatic, key_update)
+        except ValueError as error:
+            logger.warning('provider settings rejected error=%s', type(error).__name__)
+            raise HTTPException(400, '接口地址或密钥无效，请检查后重试') from error
         except OSError as error:
             logger.error('provider settings write failed error=%s', type(error).__name__)
             raise HTTPException(500, '无法保存密钥文件，请检查数据目录权限') from error
@@ -1086,7 +1066,7 @@ def create_web_router(db, memory, ha, ollama, event_filter, settings, cooccurren
         if client is None:
             return RedirectResponse('/settings?status=saved', status_code=303)
         reachable = await client.healthy()
-        return RedirectResponse(f"/settings?status={('saved_ok' if reachable else 'saved_fail')}", status_code=303)
+        return RedirectResponse(f'/settings?status={('saved_ok' if reachable else 'saved_fail')}', status_code=303)
 
     @router.get('/api/models', dependencies=auth)
     async def api_models():

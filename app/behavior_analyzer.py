@@ -9,16 +9,21 @@ import httpx
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from .llm_schema import DISTILL_CONTEXT_TOKENS, MODEL_CALL_WALL_SECONDS, MODEL_CONTEXT_TOKENS, MODEL_OUTPUT_RESERVE_TOKENS, MODEL_PROMPT_RESERVE_TOKENS, REMOTE_PAYLOAD_TOKEN_BUDGET, REPORT_LIST_LIMIT, compact_json, conservative_token_estimate, payload_token_budget
+from .llm_schema import DISTILL_CONTEXT_TOKENS, MODEL_CALL_WALL_SECONDS, MODEL_CONTEXT_TOKENS, MODEL_OUTPUT_RESERVE_TOKENS, MODEL_PROMPT_RESERVE_TOKENS, REMOTE_PAYLOAD_TOKEN_BUDGET, REPORT_LIST_LIMIT, compact_json, conservative_token_estimate, ollama_input_budget, payload_token_budget
 from .llm_schema import RetryableModelFormatError, filter_automation_run_claims, normalize_device_availability_claims, normalize_identity_claims, validate_identity_references
+from .guidance_retrieval import select_guidance
+from .optional_context import compact_optional_context
+from .model_transport import RETRY_INSTRUCTION
 from .event_preprocessor import preprocess
 from .report_context_builder import AUTOMATION_RUNS_LIMIT, build_window_payload, occupancy_summary_block
 from .event_taxonomy import classify as classify_metric
 from .robot_presence import block_unreviewed_candidates, build_annotations
 from .home_topology import HomeTopology
 from .model_metrics import ModelCallLock
-from .telemetry_stats import finite_number
+from .telemetry_stats import finite_number, summarize_samples
+from .telemetry_projection import PROTECTED_ENTITIES_KEY, STABLE_ENTITIES_KEY, project_telemetry, protected_telemetry_entities, stable_telemetry_entities, select_metric_summaries
 from .report_evidence import clipped_sessions, occupancy_rollup, window_facts, usable_report, report_coverage
+from .question_grounding import question_context, strip_question_context
 logger = logging.getLogger(__name__)
 PERIOD_NON_TERMINAL = frozenset({'generating', 'interrupted'})
 REFERENCE_SUMMARY_CHARS = 800
@@ -35,13 +40,14 @@ ATTEMPT_STATE_KEY = 'period_attempts'
 ATTEMPT_STATE_WINDOWS = 8
 PERIOD_UPSERT = 'INSERT OR REPLACE INTO period_summaries(period_start,period_end,summary_json,created_at,llm_model,llm_duration_ms) VALUES(?,?,?,?,?,?)'
 PERIOD_PLACEHOLDER = 'INSERT OR IGNORE INTO period_summaries(period_start,period_end,summary_json,created_at,llm_model,llm_duration_ms) VALUES(?,?,?,?,?,?)'
+PERIOD_INTERRUPTED = "INSERT INTO period_summaries(period_start,period_end,summary_json,created_at,llm_model,llm_duration_ms) VALUES(?,?,?,?,?,?) ON CONFLICT(period_start) DO UPDATE SET period_end=excluded.period_end,summary_json=excluded.summary_json,created_at=excluded.created_at,llm_model=excluded.llm_model,llm_duration_ms=excluded.llm_duration_ms WHERE CASE WHEN json_valid(period_summaries.summary_json) THEN COALESCE(json_extract(period_summaries.summary_json,'$.generation_status'),'succeeded') ELSE 'unknown' END <> 'succeeded'"
 
 class PayloadBudgetError(RuntimeError):
     pass
 
 class BehaviorAnalyzer:
     PAYLOAD_FLOORS = (('memory_segments', 0), ('metric_summaries', 2), ('representative_events', 4), ('automation_runs', 1), ('existing_patterns', 2), ('patterns', 2), ('sessions', 6), ('major_sessions', 8), ('robot_presence_annotations', 1), ('recent_detail', 8), ('cooccurrence_findings', 1), ('pattern_evidence_groups', 5), ('event_groups', 8), ('entity_identity_catalog', 20), ('reviewed_pattern_feedback', 5), ('critical_events', 3), ('period_summaries', 4), ('daily_summaries', 7), ('automation_corrections', 5), ('spatial_transition_candidates', 0))
-    PAYLOAD_HARD_FLOORS = {'event_groups': 1, 'pattern_evidence_groups': 5, 'entity_identity_catalog': 20, 'critical_events': 1}
+    PAYLOAD_HARD_FLOORS = {'event_groups': 1, 'pattern_evidence_groups': 1, 'entity_identity_catalog': 20, 'critical_events': 1}
     HOME_STATE_HARD_FLOOR = 8
     IDENTITY_CATALOG_LIMIT = 60
     IDENTITY_CATALOG_CHARS = 2400
@@ -115,26 +121,10 @@ class BehaviorAnalyzer:
 
     def _attach_guidance_and_memories(self, payload, scope, start, end):
         guidance = payload.get('user_guidance') or []
-        topics = set()
-        for item in payload.get('entity_identity_catalog') or []:
-            for key in ('area', 'device', 'name'):
-                value = str(item.get(key) or '')
-                if len(value) > 1:
-                    topics.add(value)
-
-        def priority(item):
-            content = str(item.get('content') or '')
-            answer = content.partition('房主回答')[2]
-            correction = any((word in answer for word in ('不是', '不要', '不能', '不代表', '误报', '纠正')))
-            return (item.get('id') is not None, item.get('kind') == 'qa_history', not correction, -sum((topic in content for topic in topics)), -int(item.get('id') or 0))
-        chosen, used = ([], 0)
-        for item in sorted(guidance, key=priority):
-            cost = self._payload_tokens(item)
-            if used + cost <= 1400:
-                chosen.append(item)
-                used += cost
+        chosen, selection = select_guidance(guidance, payload)
         payload['user_guidance'] = chosen
-        payload['guidance_selection'] = {'available': len(guidance), 'selected': len(chosen), 'omitted': len(guidance) - len(chosen), 'note': '有效明确规则优先，其后为相关回答；未入选不等于被否定。'}
+        protected = {'explicit_rule', 'slot_answer', 'related_correction', 'general_correction'}
+        payload['guidance_selection'] = {'available': selection['available'], 'selected': selection['selected'], 'omitted': selection['omitted'], 'protected_count': sum((reason in protected for reason in selection['reasons'])), 'note': '有效明确规则优先，其后为相关回答；未入选不等于被否定。'}
         memories = self.db.rows("SELECT id,type,content,confidence,status,updated_at FROM memories WHERE status IN ('confirmed','observed') AND datetime(updated_at)<=datetime(?) ORDER BY CASE WHEN status='confirmed' THEN 0 ELSE 1 END,datetime(updated_at) DESC,id DESC", (end.isoformat(),))
         selected, used = ([], 0)
         for item in memories:
@@ -151,6 +141,9 @@ class BehaviorAnalyzer:
 
     def _payload_floor(self, payload, key):
         if key == 'user_guidance' and 'guidance_selection' in payload:
+            selection = payload['guidance_selection']
+            if 'protected_count' in selection:
+                return min(selection['protected_count'], len(payload[key]))
             protected = [index + 1 for index, item in enumerate(payload[key]) if item.get('kind') != 'qa_history' or any((word in str(item.get('content') or '').partition('房主回答')[2] for word in ('不是', '不要', '不能', '不代表', '误报', '纠正')))]
             return max(protected, default=0)
         if key in ('period_summaries', 'daily_summaries') and 'report_coverage' in payload:
@@ -243,11 +236,25 @@ class BehaviorAnalyzer:
         token_budget = budget or self._default_budget()
         reference_cap = reference_token_limit or REFERENCE_TOKEN_LIMIT
         model_payload = copy.deepcopy(payload)
+        strip_question_context(model_payload)
+        reference = model_payload.get('reference_report')
+        if isinstance(reference, dict) and 'own_report' not in model_payload:
+            model_payload['reference_report'] = {'purpose': 'style_only', 'sections': [key for key in ('summary', 'supports', 'anomalies', 'automation_corrections', 'noteworthy') if reference.get(key)], 'instruction': '先描述当前窗口事实，再说明不确定性，最后提出值得房主确认的背景。示例原文的设备、次数和时间不属于当前窗口。'}
+        candidates = model_payload.get(STABLE_ENTITIES_KEY)
+        protected_telemetry = model_payload.get(PROTECTED_ENTITIES_KEY)
         model_payload.pop('cooccurrence_findings_full', None)
         model_payload.pop('cooccurrence_meta', None)
         model_payload.pop('evidence_coverage', None)
         for key in [key for key in model_payload if str(key).startswith('_')]:
             model_payload.pop(key, None)
+        telemetry_diagnostics = project_telemetry(model_payload, candidates, protected_telemetry)
+        selection = model_payload.get('guidance_selection')
+        if isinstance(selection, dict):
+            protected = self._payload_floor(model_payload, 'user_guidance')
+            model_payload['guidance_selection'] = {'protected_count': protected}
+        for item in model_payload.get('user_guidance') or []:
+            if isinstance(item, dict):
+                item.pop('id', None)
         for collection in ('event_groups', 'pattern_evidence_groups'):
             for group in model_payload.get(collection) or []:
                 if isinstance(group, dict):
@@ -269,11 +276,19 @@ class BehaviorAnalyzer:
                 model_payload['entity_identity_catalog'] = [item for item in model_payload['entity_identity_catalog'] if not str(item.get('entity_id') or '').startswith('automation.')]
         if 'cooccurrence_meta' in model_payload:
             model_payload['cooccurrence_meta']['payload_collections'] = {'before': before, 'after': dict(before)}
+        optional = {}
+        regular = model_payload.get('analysis_scope') in REPORT_TYPE_INSTRUCTIONS and reference_cap < DISTILL_REFERENCE_TOKEN_LIMIT
+        if regular:
+            if 'reference_report' in model_payload and self._payload_tokens({'reference_report': model_payload['reference_report']}) > reference_cap:
+                model_payload.pop('reference_report', None)
+            optional = compact_optional_context(model_payload)
         for key, minimum in self.PAYLOAD_FLOORS:
             values = model_payload.get(key)
             if not isinstance(values, list):
                 continue
             floor = min(max(minimum, self._payload_floor(model_payload, key)), len(values))
+            if regular and key == 'memory_segments':
+                floor = min(1, len(values))
             while len(values) > floor and self._over_budget(model_payload, token_budget):
                 values.pop()
                 self._note_collection_size(model_payload, key, len(values))
@@ -285,7 +300,7 @@ class BehaviorAnalyzer:
             model_payload.pop('reference_report', None)
             self._shrink_to_budget(model_payload, token_budget)
         after = {key: len(model_payload[key]) for key in keys}
-        selection = model_payload.get('guidance_selection')
+        model_payload.pop('guidance_selection', None)
         if isinstance(selection, dict):
             selection['selected'] = after.get('user_guidance', 0)
             selection['omitted'] = selection.get('available', before.get('user_guidance', 0)) - selection['selected']
@@ -294,11 +309,13 @@ class BehaviorAnalyzer:
             collection_meta = {'before': before, 'after': after}
             if isinstance(payload.get('cooccurrence_meta'), dict):
                 payload['cooccurrence_meta']['payload_collections'] = copy.deepcopy(collection_meta)
-        if self._over_budget(model_payload, token_budget):
-            logger.error('model payload budget exceeded size=%s limit=%s tokens=%s token_budget=%s collections=%s', self._payload_size(model_payload), token_budget * 2, self._payload_tokens(model_payload), token_budget, after)
-            raise PayloadBudgetError('model payload exceeds input budget')
-        coverage = {'input_tokens_estimate': self._payload_tokens(model_payload), 'segments_available': before.get('memory_segments', 0), 'segments_selected': after.get('memory_segments', 0), 'action_groups_available': before.get('event_groups', 0), 'action_groups_selected': after.get('event_groups', 0), 'guidance_selected': after.get('user_guidance', 0), 'guidance_omitted': (selection or {}).get('omitted', 0), 'memories_selected': after.get('long_term_memories', 0), 'memories_omitted': before.get('long_term_memories', 0) - after.get('long_term_memories', 0), 'automation_rows_omitted': before.get('automation_runs', 0) - after.get('automation_runs', 0), 'spatial_candidates_available': before.get('spatial_transition_candidates', 0), 'spatial_candidates_selected': after.get('spatial_transition_candidates', 0), 'current_snapshot_omitted': retrospective and 'home_state_snapshot' in payload}
+        coverage = {'telemetry_projection': telemetry_diagnostics, 'input_tokens_estimate': self._payload_tokens(model_payload), 'input_token_budget': token_budget, 'input_tokens_by_field': {key: self._payload_tokens(value) for key, value in model_payload.items()}, 'budget_exceeded': self._over_budget(model_payload, token_budget), 'segments_available': before.get('memory_segments', 0), 'segments_selected': after.get('memory_segments', 0), 'action_groups_available': before.get('event_groups', 0), 'action_groups_selected': after.get('event_groups', 0), 'pattern_groups_available': before.get('pattern_evidence_groups', 0), 'pattern_groups_selected': after.get('pattern_evidence_groups', 0), 'pattern_groups_omitted': before.get('pattern_evidence_groups', 0) - after.get('pattern_evidence_groups', 0), 'guidance_selected': after.get('user_guidance', 0), 'guidance_omitted': (selection or {}).get('omitted', 0), 'memories_selected': after.get('long_term_memories', 0), 'memories_omitted': before.get('long_term_memories', 0) - after.get('long_term_memories', 0), 'automation_rows_omitted': before.get('automation_runs', 0) - after.get('automation_runs', 0), 'spatial_candidates_available': before.get('spatial_transition_candidates', 0), 'spatial_candidates_selected': after.get('spatial_transition_candidates', 0), 'current_snapshot_omitted': retrospective and 'home_state_snapshot' in payload}
+        if optional:
+            coverage['optional_context'] = optional
         payload['evidence_coverage'] = coverage
+        if coverage['budget_exceeded']:
+            logger.error('model payload budget exceeded size=%s limit=%s tokens=%s token_budget=%s collections=%s', self._payload_size(model_payload), token_budget * 2, coverage['input_tokens_estimate'], token_budget, after)
+            raise PayloadBudgetError('model payload exceeds input budget')
         return model_payload
 
     def _set_cooccurrence_state(self, value):
@@ -365,7 +382,7 @@ class BehaviorAnalyzer:
                 if 'description' in finding:
                     lift = finding.get('lift')
                     lift_text = '基线为零' if lift is None else f'{float(lift):.4f}'
-                    finding['description'] = f"{labels['actor_label']}与{labels['sensor_label']}在清扫期间呈统计共现：{finding.get('episodes_with_edge')}/{finding.get('episodes_total')} 个清扫时段命中，提升倍数={lift_text}；这不是因果结论。"
+                    finding['description'] = f'{labels['actor_label']}与{labels['sensor_label']}在清扫期间呈统计共现：{finding.get('episodes_with_edge')}/{finding.get('episodes_total')} 个清扫时段命中，提升倍数={lift_text}；这不是因果结论。'
         for collection in (result.get('full') or [], result.get('compact') or []):
             for finding in collection:
                 if isinstance(finding, dict) and finding.get('finding_id') in by_id:
@@ -398,11 +415,13 @@ class BehaviorAnalyzer:
             result.append(item)
         return sorted(result, key=lambda item: item['count'], reverse=True)[:limit]
 
-    def _pattern_evidence(self, end_local, limit=100):
+    def _pattern_evidence(self, end_local, limit=100, max_events=None):
         end_utc = end_local.astimezone(timezone.utc)
         start_utc = end_utc - timedelta(days=PATTERN_EVIDENCE_LOOKBACK_DAYS)
         collection_start = self.db.scalar("SELECT value FROM system_state WHERE key='collection_started_at'") or start_utc.isoformat()
-        events = self.db.rows("SELECT id,domain,category,event_type,source,entity_id,area,old_state,new_state,attributes_json,metadata_json,ts FROM events WHERE datetime(ts)>=MAX(datetime(?),datetime(?)) AND datetime(ts)<datetime(?) AND (domain NOT IN ('sensor','binary_sensor','automation','system','persistent_notification','person','device_tracker') OR (domain='sensor' AND category='appliance')) AND event_type NOT IN ('environment_aggregate','appliance_metric_aggregate','automation_triggered') ORDER BY datetime(ts),id", (start_utc.isoformat(), collection_start, end_utc.isoformat()))
+        events = self.db.rows("SELECT id,domain,category,event_type,source,entity_id,area,old_state,new_state,attributes_json,metadata_json,ts FROM events WHERE datetime(ts)>=MAX(datetime(?),datetime(?)) AND datetime(ts)<datetime(?) AND (domain NOT IN ('sensor','binary_sensor','automation','system','persistent_notification','person','device_tracker') OR (domain='sensor' AND category='appliance')) AND event_type NOT IN ('environment_aggregate','appliance_metric_aggregate','automation_triggered') ORDER BY datetime(ts),id" + (' LIMIT ?' if max_events is not None else ''), (start_utc.isoformat(), collection_start, end_utc.isoformat()) + ((max_events + 1,) if max_events is not None else ()))
+        if max_events is not None and len(events) > max_events:
+            raise ValueError('cross-day evidence volume exceeds idle task limit')
         groups = self._event_groups(events, limit=limit)
         minimum = getattr(self.memory, 'min_pattern_samples', 5)
         groups = [group for group in groups if group['count'] >= minimum]
@@ -477,38 +496,21 @@ class BehaviorAnalyzer:
                 labels[entity_id] = label
         return labels
 
-    def _metric_summaries(self, events, limit=40, identities=None):
-        summaries = []
+    def _metric_summaries(self, events, limit=40, identities=None, protected=(), context=None):
+        groups = {}
         for event in events:
             if event.get('event_type') not in {'environment_aggregate', 'appliance_metric_aggregate'}:
                 continue
-            stats = self._json_object(event.get('metadata_json'))
             attrs = self._json_object(event.get('attributes_json'))
-            numeric = {}
-            valid = True
-            for key in ('avg', 'min', 'max', 'delta'):
-                try:
-                    value = float(stats[key])
-                    if not -1000000 <= value <= 1000000:
-                        valid = False
-                        break
-                    numeric[key] = round(value, 4)
-                except (KeyError, TypeError, ValueError, OverflowError):
-                    valid = False
-                    break
-            if not valid:
-                continue
-            try:
-                sample_count = int(stats.get('count', 0))
-            except (TypeError, ValueError, OverflowError):
-                continue
-            if isinstance(stats.get('count'), bool) or sample_count <= 0:
-                continue
-            summaries.append({'entity_id': event.get('entity_id'), 'category': event.get('category'), **{key: value for key, value in (identities or {}).get(event.get('entity_id'), {}).items() if key in ('device', 'area')}, 'period_start': self._local_time(stats.get('period_start')), 'period_end': self._local_time(event.get('ts')), 'unit': str(attrs.get('unit_of_measurement', ''))[:32], 'sample_count': min(sample_count, 1000000), 'valid_samples': min(sample_count, 1000000), 'missing_samples': None, 'invalid_samples': stats['invalid_samples'] if isinstance(stats.get('invalid_samples'), int) and (not isinstance(stats['invalid_samples'], bool)) and (stats['invalid_samples'] >= 0) else None, 'average_basis': 'samples', **numeric})
-            variance = finite_number(stats.get('variance'))
-            if variance is not None and variance >= 0 and (stats.get('variance_ddof') == 0):
-                summaries[-1].update({'variance': round(variance, 4), 'variance_ddof': 0})
-        return summaries[-limit:]
+            key = (event.get('entity_id'), event.get('category'), str(attrs.get('unit_of_measurement', ''))[:32])
+            groups.setdefault(key, []).append(event)
+        summaries = []
+        for (entity, category, unit), group in groups.items():
+            stats = summarize_samples(group, lambda row: self._json_object(row.get('metadata_json')))
+            summaries.append({'entity_id': entity, 'category': category, **{key: value for key, value in (identities or {}).get(entity, {}).items() if key in ('device', 'area', 'name')}, **stats, 'period_start': self._local_time(stats.get('start') or group[0].get('ts')), 'period_end': self._local_time(stats.get('end') or group[-1].get('ts')), 'unit': unit, 'summary_basis': 'whole_window_samples'})
+            for key in ('start', 'end', 'trend'):
+                summaries[-1].pop(key, None)
+        return select_metric_summaries(summaries, limit, protected, context)
 
     def _reviewed_feedback(self):
         rows = self.db.rows("SELECT p.id,p.type,p.fingerprint,p.description,p.status,f.action,f.note,f.created_at FROM patterns p LEFT JOIN feedback f ON f.id=(SELECT f2.id FROM feedback f2 WHERE f2.pattern_id=p.id ORDER BY f2.id DESC LIMIT 1) WHERE p.status IN ('confirmed','rejected') ORDER BY COALESCE(f.created_at,p.last_seen) DESC LIMIT 20")
@@ -569,13 +571,18 @@ class BehaviorAnalyzer:
         occupancy = occupancy_summary_block(preprocessed, events)
         robot_presence = build_annotations(events, cooccurrence['full'], self._identity, caps['robot_presence_annotations'], incomplete_entities=suspects)
         movements = self._movements_in_window(start_local, end_local)
-        payload = {'analysis_scope': scope, 'period_start': start_local.isoformat(), 'period_end': end_local.isoformat(), 'total_events': len(events), 'event_counts': self._counts(events), 'event_groups': groups, 'occupancy_summary': occupancy, 'automation_runs': preprocessed.automation_runs[:AUTOMATION_RUNS_LIMIT], 'robot_presence_annotations': robot_presence, 'movements': movements, 'home_topology': self.home_topology.context(), 'spatial_transition_candidates': self._localize_rows(self.home_topology.candidates(preprocessed.compressed, caps['spatial_transition_candidates']), ('time',)), 'representative_events': important, 'entity_identity_catalog': self._identity_catalog(events), 'metric_summaries': self._metric_summaries(events, limit=caps['metric_summaries'], identities=identities), 'user_guidance': self._window_guidance(scope, start_local), 'reviewed_pattern_feedback': self._reviewed_feedback(), 'timezone': 'Asia/Shanghai (UTC+08:00, Beijing Time)', 'sessions': [{**row, 'room': self._session_room(row.get('room'))} for row in _filtered_sessions([row for row in self._localize_rows(sessions, ('start_ts', 'end_ts')) if not session_inside_systemic_window(row, preprocessed.systemic_windows)], session_exclusions)], 'existing_patterns': patterns, 'deterministic_anomalies': self._localize_rows(self.anomaly_detector.detect(end), ('first_seen', 'last_seen')), 'cooccurrence_findings': cooccurrence['compact'], 'cooccurrence_findings_full': cooccurrence['full'], 'cooccurrence_meta': cooccurrence['meta'], '_evidence_by_id': evidence_by_id}
+        payload = {'analysis_scope': scope, 'period_start': start_local.isoformat(), 'period_end': end_local.isoformat(), 'total_events': len(events), 'event_counts': self._counts(events), 'event_groups': groups, 'occupancy_summary': occupancy, 'automation_runs': preprocessed.automation_runs[:AUTOMATION_RUNS_LIMIT], 'robot_presence_annotations': robot_presence, 'movements': movements, 'home_topology': self.home_topology.context(), 'spatial_transition_candidates': self._localize_rows(self.home_topology.candidates(preprocessed.compressed, caps['spatial_transition_candidates']), ('time',)), 'representative_events': important, 'entity_identity_catalog': self._identity_catalog(events), 'metric_summaries': [], 'user_guidance': self._window_guidance(scope, start_local), 'reviewed_pattern_feedback': self._reviewed_feedback(), 'timezone': 'Asia/Shanghai (UTC+08:00, Beijing Time)', 'sessions': [{**row, 'room': self._session_room(row.get('room'))} for row in _filtered_sessions([row for row in self._localize_rows(sessions, ('start_ts', 'end_ts')) if not session_inside_systemic_window(row, preprocessed.systemic_windows)], session_exclusions)], 'existing_patterns': patterns, 'deterministic_anomalies': self._localize_rows(self.anomaly_detector.detect(end), ('first_seen', 'last_seen')), 'cooccurrence_findings': cooccurrence['compact'], 'cooccurrence_findings_full': cooccurrence['full'], 'cooccurrence_meta': cooccurrence['meta'], '_evidence_by_id': evidence_by_id}
         trusted = clipped_sessions(payload['sessions'], start_local, end_local, self._session_room)
         payload['sessions'] = trusted[:caps['sessions']]
         payload['occupancy_rollup'] = occupancy_rollup(trusted)
         payload['window_facts'] = window_facts(self, events, trusted, start_local, end_local)
         from .critical_events import detect
-        payload['critical_events'] = sorted(detect(events, preprocessed), key=lambda item: -item.get('score', 0))[:10]
+        critical_pool = detect(events, preprocessed)
+        payload['critical_events'] = sorted(critical_pool, key=lambda item: -item.get('score', 0))[:10]
+        protected = protected_telemetry_entities(events, critical_pool)
+        payload[PROTECTED_ENTITIES_KEY] = sorted(protected)
+        payload['metric_summaries'] = self._metric_summaries(events, limit=caps['metric_summaries'], identities=identities, protected=protected, context=payload)
+        payload[STABLE_ENTITIES_KEY] = sorted(stable_telemetry_entities(preprocessed.compressed, protected, context=payload, identities=identities))
         self._attach_guidance_and_memories(payload, scope, start_local, end_local)
         return payload
 
@@ -612,11 +619,14 @@ class BehaviorAnalyzer:
         return counts
 
     def _fallback_report(self, payload, error):
+        reason = getattr(error, 'code', None)
+        if not isinstance(reason, str) or reason not in {'invalid_json_shape', 'schema_validation', 'segment_schema', 'cooccurrence_identity', 'vacuum_trajectory', 'room_identity', 'device_identity'}:
+            reason = 'input_budget' if isinstance(error, PayloadBudgetError) else 'transport_or_timeout' if isinstance(error, (httpx.HTTPError, asyncio.TimeoutError)) else 'internal_error'
         event_count = int(payload.get('total_events', 0) or 0)
         summary = f'本时段记录了 {event_count} 条有效事件，但本地模型输出未通过结构或设备身份校验。为避免展示错误设备名称，本次不展示模型推断；原始事件和确定性统计仍已保留。'
         if isinstance(error, PayloadBudgetError):
             summary = '本次分析输入超过模型预算，尚未调用模型，本次不展示模型推断；原始事件、确定性统计和报告覆盖信息仍已保留。'
-        return {'summary': summary, 'supports': [], 'new_candidates': [], 'anomalies': payload.get('deterministic_anomalies', [])[:5], 'automation_corrections': [], 'noteworthy': [], 'generation_status': 'model_output_rejected', 'error_type': type(error).__name__, 'analysis_scope': payload.get('analysis_scope', 'period'), 'report_coverage': payload.get('report_coverage', {}), 'evidence_coverage': payload.get('evidence_coverage', {})}
+        return {'summary': summary, 'supports': [], 'new_candidates': [], 'anomalies': payload.get('deterministic_anomalies', [])[:5], 'automation_corrections': [], 'noteworthy': [], 'generation_status': 'model_output_rejected', 'error_type': type(error).__name__, 'error_code': reason, 'analysis_scope': payload.get('analysis_scope', 'period'), 'report_coverage': payload.get('report_coverage', {}), 'evidence_coverage': payload.get('evidence_coverage', {})}
 
     def resolved_model(self, model=None):
         return str(model or self.ollama.model)
@@ -643,6 +653,12 @@ class BehaviorAnalyzer:
         if context_tokens is not None:
             budget = payload_token_budget(context_tokens, self.output_reserve_tokens, self.prompt_reserve_tokens)
             reference_cap = DISTILL_REFERENCE_TOKEN_LIMIT
+        if await self._serving_provider(model) != 'third-party':
+            instruction = prompt or self.prompt + '\n\n' + REPORT_TYPE_INSTRUCTIONS.get(report_type or '', '')
+            safe_budget = ollama_input_budget(context_tokens or getattr(self, 'context_tokens', MODEL_CONTEXT_TOKENS), getattr(self, 'output_reserve_tokens', MODEL_OUTPUT_RESERVE_TOKENS), instruction, prompt_reserve_tokens=getattr(self, 'prompt_reserve_tokens', MODEL_PROMPT_RESERVE_TOKENS), retry_instruction=RETRY_INSTRUCTION)
+            budget = min(budget or self._default_budget(), safe_budget)
+            if budget <= 0:
+                return (self._fallback_report(payload, PayloadBudgetError('prompt exceeds context')), 0, {})
         try:
             model_payload = self._model_payload(payload, budget=budget, reference_token_limit=reference_cap)
         except PayloadBudgetError as error:
@@ -673,6 +689,9 @@ class BehaviorAnalyzer:
         result, blocked_count = block_unreviewed_candidates(result, payload.get('robot_presence_annotations') or [])
         if blocked_count:
             logger.warning('blocked unreviewed robot-presence candidates count=%s', blocked_count)
+        context = question_context(payload, token_budget=600)
+        if context is not None:
+            result['fact_context'] = context
         return (result, duration, raw)
 
     async def _guarded_model_analysis(self, payload, model=None, report_type=None, budget=None):
@@ -1072,8 +1091,13 @@ class BehaviorAnalyzer:
             payload['reference_report'] = example
         return example
 
-    def _store_period(self, start, end, report, duration_ms, model=None, placeholder=False):
-        statement = PERIOD_PLACEHOLDER if placeholder else PERIOD_UPSERT
+    def _store_period(self, start, end, report, duration_ms, model=None, placeholder=False, protect_succeeded=False):
+        if placeholder:
+            statement = PERIOD_PLACEHOLDER
+        elif protect_succeeded:
+            statement = PERIOD_INTERRUPTED
+        else:
+            statement = PERIOD_UPSERT
         with self.db.connect() as con:
             con.execute(statement, (start.isoformat(), end.isoformat(), json.dumps(report, ensure_ascii=False), datetime.now(timezone.utc).isoformat(), self.resolved_model(model), duration_ms))
 
@@ -1150,7 +1174,7 @@ class BehaviorAnalyzer:
                 result, duration, _ = await self._safe_model_analysis(payload, model, report_type='period', budget=budget)
         except asyncio.CancelledError:
             elapsed = int((time.perf_counter() - started) * 1000)
-            self._store_period(start, end, self._interrupted_report(scope), 0, model)
+            self._store_period(start, end, self._interrupted_report(scope), 0, model, protect_succeeded=True)
             self.release_period_attempt(start)
             self._finish_period_job(job, 'interrupted', elapsed, 'CancelledError')
             raise

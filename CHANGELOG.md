@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- Add opt-in local draft/review/revision with complete evidence and shared request budgets.
+- Ground local questions in deterministic evidence and add bounded read-only fact queries.
+- Add opt-in idle scouting with daily request caps and ordinary-work priority.
+- Recover accepted queued manual jobs across restarts; mark interrupted work explicitly.
+- Build fresh runtime state per lifespan and record content-free request stages and optional engine timings.
+- Preserve offline defaults, per-instance network policy, loopback UI and bundled synthetic resources.
+- Verify additive schema compatibility from v0.2.1; preserve existing events and accounting rows.
+
 ## 0.2.1
 
 - Repair daily/weekly scope, evidence coverage, bounded report context and overlap clipping.

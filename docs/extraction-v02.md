@@ -38,3 +38,14 @@ only supplied adjacency and uncertainty. Prompt resources load from the installe
 independently of the local entity allowlist. No household graph or production data is copied.
 Per-file provenance remains in the ignored maintainer audit directory. Test counts and
 installation results are recorded for this public patch, separately from source-project checks.
+
+## 0.3.0 extraction update (2026-10-15)
+
+Selected committed application changes add bounded evidence retrieval, optional local review,
+idle leads, persistent manual work and lifecycle/request diagnostics. Runtime construction is
+adapted to retain the public offline defaults, loopback request boundary and guarded transports.
+Each runtime passes its own network policy to HA, local and newly configured remote clients.
+Packaged prompts remain independent of an entity allowlist's directory; the household topology
+and all private persistent policies remain excluded. Frozen public schema fixtures and synthetic
+regressions are included; internal deployment/test counts are not public-release evidence.
+The exact extraction source and file hashes remain in the ignored local audit record.

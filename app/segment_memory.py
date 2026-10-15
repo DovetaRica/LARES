@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import logging
 import time
@@ -8,6 +9,7 @@ from .critical_events import detect as detect_critical
 from .event_preprocessor import _parse_ts, preprocess
 from .event_taxonomy import classify as classify_event
 from .llm_schema import RetryableModelFormatError, compact_json, conservative_token_estimate, segment_call_wall_seconds, validate_segment_summary
+from .telemetry_projection import PROTECTED_ENTITIES_KEY, STABLE_ENTITIES_KEY, project_telemetry, protected_telemetry_entities, stable_telemetry_entities
 from .time_display import chinese_label
 logger = logging.getLogger(__name__)
 
@@ -179,7 +181,7 @@ class SegmentMemory:
             critical = detect_critical(events, preprocessed)
         occupancy = [item for item in preprocessed.compressed if item.get('state') == '有人'][:15]
         automation = list(preprocessed.automation_runs or [])[:10]
-        summary_text = _program_label('Level-1 切片：', segment, f"共 {int(segment['event_count'] or 0)} 条事件；占用区间 {len(occupancy)}，自动化 {len(automation)}，传感器噪声 {len(preprocessed.sensor_noise)}，关键 {len(critical)}")[:500]
+        summary_text = _program_label('Level-1 切片：', segment, f'共 {int(segment['event_count'] or 0)} 条事件；占用区间 {len(occupancy)}，自动化 {len(automation)}，传感器噪声 {len(preprocessed.sensor_noise)}，关键 {len(critical)}')[:500]
         body = {'kind': 'level1_slice', 'summary': summary_text, 'occupancy': occupancy, 'automation_runs': automation, 'sensor_noise_count': len(preprocessed.sensor_noise), 'critical': critical[:10], 'event_count': int(segment['event_count'] or 0), 'ai_mode': self.ai_mode}
         if extra:
             body.update(extra)
@@ -283,14 +285,16 @@ class SegmentMemory:
         preprocessed.start_state = {entity: state_before[entity] for entity in preprocessed.end_state if entity in state_before}
         critical = detect_critical(events, preprocessed)
         catalog = self.analyzer._identity_catalog(events)
-        return {'segment_start': segment['period_start'], 'segment_end': segment['period_end'], 'raw_event_count': segment['event_count'], 'compressed_events': preprocessed.compressed, 'critical_events': critical[:10], 'automation_runs': preprocessed.automation_runs[:10], 'start_state': preprocessed.start_state, 'end_state': preprocessed.end_state, 'entity_identity_catalog': catalog, 'timezone': 'Asia/Shanghai (UTC+08:00, Beijing Time)'}
+        protected = protected_telemetry_entities(events, critical)
+        return {'segment_start': segment['period_start'], 'segment_end': segment['period_end'], 'raw_event_count': segment['event_count'], 'compressed_events': preprocessed.compressed, 'critical_events': critical[:10], 'automation_runs': preprocessed.automation_runs[:10], 'start_state': preprocessed.start_state, 'end_state': preprocessed.end_state, 'entity_identity_catalog': catalog, STABLE_ENTITIES_KEY: sorted(stable_telemetry_entities(preprocessed.compressed, protected)), PROTECTED_ENTITIES_KEY: sorted(protected), 'timezone': 'Asia/Shanghai (UTC+08:00, Beijing Time)'}
 
     def _bound_segment_payload(self, payload, budget_tokens=None):
         from .llm_schema import payload_token_budget
         budget = budget_tokens or payload_token_budget()
-        bounded = dict(payload)
+        bounded = copy.deepcopy(payload)
+        project_telemetry(bounded, bounded.pop(STABLE_ENTITIES_KEY, None), bounded.pop(PROTECTED_ENTITIES_KEY, None))
         event_budget = max(200, int(budget * SEGMENT_EVENT_BUDGET_FRACTION))
-        items = payload.get('compressed_events') or []
+        items = bounded.get('compressed_events') or []
         kept, used = ([], 0)
         for item in items:
             cost = conservative_token_estimate(compact_json(item))
@@ -338,7 +342,7 @@ class SegmentMemory:
 
     def _store_deterministic(self, segment, reason, duration_ms=None, wall_seconds=None, prompt_tokens=None):
         now = datetime.now(timezone.utc).isoformat()
-        summary = {'summary': _program_label('确定性压缩段：', segment, f"共 {int(segment['event_count'] or 0)} 条原始事件；（{reason}，未完成 AI 摘要，程序摘要占位；报告以确定性证据为准）")[:500], 'occupancy': [], 'movement': [], 'device_activity': [], 'automations': [], 'manual_actions': [], 'anomalies': [], 'uncertainties': [f'本段因 {reason} 未完成模型压缩，仅保留确定性时间窗与事件量']}
+        summary = {'summary': _program_label('确定性压缩段：', segment, f'共 {int(segment['event_count'] or 0)} 条原始事件；（{reason}，未完成 AI 摘要，程序摘要占位；报告以确定性证据为准）')[:500], 'occupancy': [], 'movement': [], 'device_activity': [], 'automations': [], 'manual_actions': [], 'anomalies': [], 'uncertainties': [f'本段因 {reason} 未完成模型压缩，仅保留确定性时间窗与事件量']}
         with self.db.connect() as con:
             con.execute("UPDATE event_segments SET summary_json=?, summary_text=?, status='succeeded', model=?, last_error=NULL, retry_count=?, updated_at=? WHERE id=?", (compact_json(summary), summary['summary'], 'deterministic-fallback', int(segment['retry_count'] or 0) + 1, now, segment['id']))
         self._advance_cursor(segment['end_event_id'])
@@ -356,6 +360,7 @@ class SegmentMemory:
 
     async def _summarize_segment(self, segment):
         payload = self._segment_payload(segment)
+        project_telemetry(payload, payload.pop(STABLE_ENTITIES_KEY, None), payload.pop(PROTECTED_ENTITIES_KEY, None))
         est_tokens = conservative_token_estimate(compact_json(payload))
         if est_tokens > self.segment_payload_hard_limit:
             now = datetime.now(timezone.utc).isoformat()
